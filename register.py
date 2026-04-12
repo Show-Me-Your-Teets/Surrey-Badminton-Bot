@@ -36,16 +36,16 @@ LOGIN_URL  = "https://accounts.surrey.ca/auth.aspx?loginflow=prcms&url=https://c
 SESSIONS = {
     "monday": {
         "name":        "Drop In Badminton 13+ - Newton Recreation Centre (Mon 6:45pm)",
-        "event_id":    "REPLACE_WITH_MONDAY_EVENT_ID",
-        "location_id": "REPLACE_WITH_MONDAY_LOCATION_ID",
+        "event_id":    "65abb86d-b638-c9ff-b0f5-64f5db71c690",
+        "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6",
         "start_hour":  18,
         "start_minute": 45,
         "weekday": 0,
     },
     "tuesday": {
         "name":        "Drop In Badminton Adult - Chuck Bailey Recreation Centre (Tue 6:30pm)",
-        "event_id":    "REPLACE_WITH_TUESDAY_EVENT_ID",
-        "location_id": "REPLACE_WITH_TUESDAY_LOCATION_ID",
+        "event_id":    "0e9a4ac6-2925-85c9-7c73-a0138702c96d",
+        "location_id": "3cdb8e82-fa18-4255-8aba-0ecb93d69da4",
         "start_hour":  18,
         "start_minute": 30,
         "weekday": 1,
@@ -84,8 +84,8 @@ SESSIONS = {
     },
     "sunday": {
         "name":        "Drop In Badminton Adult - Guildford Recreation Centre (Sun 8:30am)",
-        "event_id":    "REPLACE_WITH_SUNDAY_EVENT_ID",
-        "location_id": "REPLACE_WITH_SUNDAY_LOCATION_ID",
+        "event_id":    "382ea32a-2d21-5709-a715-8e6cd7562e9a",
+        "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601",
         "start_hour":  8,
         "start_minute": 30,
         "weekday": 6,
