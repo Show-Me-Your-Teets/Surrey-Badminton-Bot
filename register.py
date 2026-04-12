@@ -1,29 +1,32 @@
 """
 Surrey Recreation - Badminton Auto-Registration Bot
+Uses direct HTTP requests instead of browser automation.
 """
 
 import os
 import sys
 import argparse
 import logging
+import re
 from datetime import datetime, timedelta
 import pytz
-from playwright.sync_api import sync_playwright
+import requests
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-WIDGET_ID = "b4059e75-9755-401f-a7b5-d7c75361420d"
+WIDGET_ID  = "b4059e75-9755-401f-a7b5-d7c75361420d"
 BASE_URL   = "https://cityofsurrey.perfectmind.com"
+LOGIN_URL  = "https://accounts.surrey.ca"
 
 SESSIONS = {
-    "monday":    {"name": "Drop In Badminton 13+ - Newton (Mon 6:45pm)",            "event_id": "65abb86d-b638-c9ff-b0f5-64f5db71c690", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 0},
-    "tuesday":   {"name": "Drop In Badminton Adult - Chuck Bailey (Tue 6:30pm)",    "event_id": "0e9a4ac6-2925-85c9-7c73-a0138702c96d", "location_id": "3cdb8e82-fa18-4255-8aba-0ecb93d69da4", "weekday": 1},
-    "wednesday": {"name": "Drop In Badminton 13+ - Newton (Wed 7:00pm)",            "event_id": "REPLACE_WITH_WEDNESDAY_EVENT_ID",        "location_id": "REPLACE_WITH_WEDNESDAY_LOCATION_ID",  "weekday": 2},
-    "thursday":  {"name": "Drop In Badminton Adult - Guildford (Thu 7:00pm)",       "event_id": "REPLACE_WITH_THURSDAY_EVENT_ID",         "location_id": "REPLACE_WITH_THURSDAY_LOCATION_ID",   "weekday": 3},
-    "friday":    {"name": "Drop In Badminton Children with Adult - Guildford (Fri 5:00pm)", "event_id": "REPLACE_WITH_FRIDAY_EVENT_ID",   "location_id": "REPLACE_WITH_FRIDAY_LOCATION_ID",     "weekday": 4},
-    "saturday":  {"name": "Drop In Badminton Adult - Guildford (Sat 6:00pm)",       "event_id": "REPLACE_WITH_SATURDAY_EVENT_ID",        "location_id": "REPLACE_WITH_SATURDAY_LOCATION_ID",   "weekday": 5},
-    "sunday":    {"name": "Drop In Badminton Adult - Guildford (Sun 8:30am)",       "event_id": "382ea32a-2d21-5709-a715-8e6cd7562e9a", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 6},
+    "monday":    {"name": "Drop In Badminton 13+ - Newton (Mon 6:45pm)",                  "event_id": "65abb86d-b638-c9ff-b0f5-64f5db71c690", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 0},
+    "tuesday":   {"name": "Drop In Badminton Adult - Chuck Bailey (Tue 6:30pm)",          "event_id": "0e9a4ac6-2925-85c9-7c73-a0138702c96d", "location_id": "3cdb8e82-fa18-4255-8aba-0ecb93d69da4", "weekday": 1},
+    "wednesday": {"name": "Drop In Badminton 13+ - Newton (Wed 7:00pm)",                  "event_id": "REPLACE_WITH_WEDNESDAY_EVENT_ID",        "location_id": "REPLACE_WITH_WEDNESDAY_LOCATION_ID",  "weekday": 2},
+    "thursday":  {"name": "Drop In Badminton Adult - Guildford (Thu 7:00pm)",             "event_id": "REPLACE_WITH_THURSDAY_EVENT_ID",         "location_id": "REPLACE_WITH_THURSDAY_LOCATION_ID",   "weekday": 3},
+    "friday":    {"name": "Drop In Badminton Children with Adult - Guildford (Fri 5pm)",  "event_id": "REPLACE_WITH_FRIDAY_EVENT_ID",           "location_id": "REPLACE_WITH_FRIDAY_LOCATION_ID",     "weekday": 4},
+    "saturday":  {"name": "Drop In Badminton Adult - Guildford (Sat 6:00pm)",             "event_id": "REPLACE_WITH_SATURDAY_EVENT_ID",         "location_id": "REPLACE_WITH_SATURDAY_LOCATION_ID",   "weekday": 5},
+    "sunday":    {"name": "Drop In Badminton Adult - Guildford (Sun 8:30am)",             "event_id": "382ea32a-2d21-5709-a715-8e6cd7562e9a", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 6},
 }
 
 
@@ -36,67 +39,6 @@ def get_occurrence_date(session):
     return (now + timedelta(days=days_ahead)).date().strftime("%Y%m%d")
 
 
-def js_click(frame, text, partial=False):
-    """Click a button by text in a specific frame."""
-    cmp = "includes" if partial else "==="
-    return frame.evaluate(f"""
-        () => {{
-            const els = [...document.querySelectorAll('button, input[type=submit]')];
-            const match = els.find(e => {{
-                const t = (e.innerText || e.value || '').trim();
-                return partial ? t.includes('{text}') : t === '{text}';
-            }});
-            if (match) {{ match.click(); return true; }}
-            return false;
-        }}
-    """.replace("partial ? t.includes", f"{'true' if partial else 'false'} ? t.includes"))
-
-
-def click_anywhere(page, text, partial=False):
-    """Click a button searching main frame + all child frames."""
-    for frame in page.frames:
-        try:
-            cmp = "t.includes" if partial else "t ==="
-            result = frame.evaluate(f"""
-                () => {{
-                    const els = [...document.querySelectorAll('button, input[type=submit]')];
-                    const match = els.find(e => {{
-                        const t = (e.innerText || e.value || '').trim();
-                        return {cmp}('{text}');
-                    }});
-                    if (match) {{ match.click(); return true; }}
-                    return false;
-                }}
-            """)
-            if result:
-                log.info(f"Clicked '{text}' in frame: {frame.url[:80]}")
-                return True
-        except Exception:
-            pass
-    raise Exception(f"Button '{text}' not found in any frame")
-
-
-def click_label_anywhere(page, text):
-    """Click a label searching all frames."""
-    for frame in page.frames:
-        try:
-            result = frame.evaluate(f"""
-                () => {{
-                    const els = [...document.querySelectorAll('label')];
-                    const match = els.find(e => e.innerText.includes('{text}'));
-                    if (match) {{ match.click(); return true; }}
-                    return false;
-                }}
-            """)
-            if result:
-                log.info(f"Clicked label '{text}' in frame: {frame.url[:80]}")
-                return True
-        except Exception:
-            pass
-    log.warning(f"Label '{text}' not found — using default selection")
-    return False
-
-
 def register(day):
     email    = os.environ["SURREY_EMAIL"]
     password = os.environ["SURREY_PASSWORD"]
@@ -107,7 +49,6 @@ def register(day):
         sys.exit(1)
 
     occurrence_date = get_occurrence_date(session)
-    # Use /Menu/ path — this is what the server expects
     reg_url = (
         f"{BASE_URL}/23615/Menu/BookMe4EventParticipants"
         f"?eventId={session['event_id']}"
@@ -119,75 +60,112 @@ def register(day):
 
     log.info(f"Session: {session['name']}")
     log.info(f"Date:    {occurrence_date}")
-    log.info(f"URL:     {reg_url}")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1280, "height": 900})
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    })
 
-        # ── Step 1: Go to reg URL → will redirect to login ────────────────────
-        page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(2000)
-        log.info(f"Initial URL: {page.url}")
+    # ── Step 1: Hit reg URL to get redirected to login, capture hidden fields ─
+    log.info("Loading login page...")
+    r = s.get(reg_url, allow_redirects=True)
+    log.info(f"Landed on: {r.url}")
 
-        # ── Step 2: Login ─────────────────────────────────────────────────────
-        if "accounts.surrey.ca" in page.url:
-            log.info("Logging in...")
-            page.wait_for_selector("#loginradius-login-emailid", state="attached", timeout=15000)
-            page.fill("#loginradius-login-emailid", email)
-            page.fill("#loginradius-login-password", password)
-            # Use proper click + wait for navigation instead of JS click
-            with page.expect_navigation(wait_until="networkidle", timeout=30000):
-                page.click("#loginradius-submit-login")
-            page.wait_for_timeout(2000)
-            log.info(f"After login URL: {page.url}")
+    # Extract hidden form fields from the login page (CSRF tokens etc.)
+    hidden_fields = {}
+    for match in re.finditer(r'<input[^>]+type=["\']hidden["\'][^>]*>', r.text, re.IGNORECASE):
+        name  = re.search(r'name=["\']([^"\']+)["\']', match.group())
+        value = re.search(r'value=["\']([^"\']*)["\']', match.group())
+        if name and value:
+            hidden_fields[name.group(1)] = value.group(1)
 
-        log.info(f"Registration page URL: {page.url}")
+    log.info(f"Hidden fields found: {list(hidden_fields.keys())}")
 
-        # ── Step 4: Attendees — click Next ────────────────────────────────────
-        log.info("Step 1/3: Clicking Next (Attendees)...")
-        page.wait_for_timeout(3000)
-        # Wait for Next button to be present then click it directly
-        next_btn = page.get_by_role("button", name="Next")
-        next_btn.wait_for(state="attached", timeout=15000)
-        next_btn.click()
-        page.wait_for_load_state("networkidle", timeout=15000)
-        page.wait_for_timeout(2000)
-        log.info(f"URL after Step 1: {page.url}")
+    # ── Step 2: Submit login form ──────────────────────────────────────────────
+    log.info("Submitting login...")
+    login_data = {
+        **hidden_fields,
+        "Email":    email,
+        "Password": password,
+    }
 
-        # ── Step 5: Fees — select Free pass, click Next ───────────────────────
-        log.info("Step 2/3: Selecting free pass, clicking Next (Fees)...")
-        page.wait_for_timeout(2000)
-        click_label_anywhere(page, "Rec Surrey Pass")
-        page.wait_for_timeout(500)
-        next_btn2 = page.get_by_role("button", name="Next")
-        next_btn2.wait_for(state="attached", timeout=10000)
-        next_btn2.click()
-        page.wait_for_load_state("networkidle", timeout=15000)
-        page.wait_for_timeout(2000)
-        log.info(f"URL after Step 2: {page.url}")
+    # Find the form action URL
+    form_action = re.search(r'<form[^>]+action=["\']([^"\']+)["\']', r.text, re.IGNORECASE)
+    if form_action:
+        action_url = form_action.group(1)
+        if not action_url.startswith("http"):
+            action_url = LOGIN_URL + action_url
+    else:
+        action_url = r.url
 
-        # ── Step 6: Payment — Place My Order ─────────────────────────────────
-        log.info("Step 3/3: Clicking Place My Order (Payment)...")
-        page.wait_for_timeout(2000)
-        place_btn = page.get_by_role("button", name="Place My Order")
-        place_btn.wait_for(state="attached", timeout=15000)
-        place_btn.click()
-        page.wait_for_load_state("networkidle", timeout=20000)
-        page.wait_for_timeout(3000)
-        log.info(f"URL after Step 3: {page.url}")
+    log.info(f"Posting login to: {action_url}")
+    r2 = s.post(action_url, data=login_data, allow_redirects=True)
+    log.info(f"After login: {r2.url} (status {r2.status_code})")
 
-        # ── Confirm ───────────────────────────────────────────────────────────
-        body = page.inner_text("body").lower()
-        if "thank you" in body:
-            log.info("✅ Registration successful! 'Thank you' page confirmed.")
-        elif "already registered" in body:
-            log.info("✅ Already registered for this session.")
-        else:
-            page.screenshot(path="debug.png")
-            log.warning("⚠️ Could not confirm. Screenshot saved as debug.png")
+    # ── Step 3: Load registration page (now authenticated) ────────────────────
+    log.info("Loading registration page...")
+    r3 = s.get(reg_url, allow_redirects=True)
+    log.info(f"Reg page: {r3.url} (status {r3.status_code})")
 
-        browser.close()
+    if "accounts.surrey.ca" in r3.url:
+        log.error("Still on login page — credentials may be wrong or login form changed.")
+        sys.exit(1)
+
+    # ── Step 4: Find and call the registration API endpoint ───────────────────
+    # PerfectMind uses JSON API calls for the booking steps
+    # Extract the anti-forgery token from the page
+    token_match = re.search(r'__RequestVerificationToken["\'][^>]*value=["\']([^"\']+)', r3.text)
+    if not token_match:
+        token_match = re.search(r'value=["\']([^"\']{80,})["\']', r3.text)
+
+    headers = {
+        "Content-Type": "application/json",
+        "Referer": r3.url,
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    if token_match:
+        headers["RequestVerificationToken"] = token_match.group(1)
+        log.info("Found verification token.")
+
+    # Step 4a: Add to cart / register attendee
+    log.info("Step 1/3: Registering attendee...")
+    api_base = f"{BASE_URL}/23615"
+    attendee_payload = {
+        "eventId":        session["event_id"],
+        "occurrenceDate": occurrence_date,
+        "widgetId":       WIDGET_ID,
+        "locationId":     session["location_id"],
+    }
+    r4 = s.post(f"{api_base}/Clients/BookMe4EventParticipants/AddToCart",
+                json=attendee_payload, headers=headers)
+    log.info(f"Attendee step: {r4.status_code} - {r4.text[:200]}")
+
+    # Step 4b: Select fee (Rec Surrey Pass - free)
+    log.info("Step 2/3: Selecting fee...")
+    fee_payload = {
+        "eventId":        session["event_id"],
+        "occurrenceDate": occurrence_date,
+        "widgetId":       WIDGET_ID,
+    }
+    r5 = s.post(f"{api_base}/Clients/BookMe4EventParticipants/SelectFee",
+                json=fee_payload, headers=headers)
+    log.info(f"Fee step: {r5.status_code} - {r5.text[:200]}")
+
+    # Step 4c: Place order
+    log.info("Step 3/3: Placing order...")
+    r6 = s.post(f"{api_base}/Clients/BookMe4EventParticipants/PlaceOrder",
+                json={}, headers=headers)
+    log.info(f"Place order: {r6.status_code} - {r6.text[:200]}")
+
+    if r6.status_code == 200 and ("true" in r6.text.lower() or "success" in r6.text.lower() or "thank" in r6.text.lower()):
+        log.info("✅ Registration successful!")
+    else:
+        log.warning(f"⚠️ Unexpected response. Status: {r6.status_code}, Body: {r6.text[:500]}")
+        log.info("Dumping all API responses for debugging...")
+        log.info(f"r4: {r4.status_code} {r4.text[:300]}")
+        log.info(f"r5: {r5.status_code} {r5.text[:300]}")
+        log.info(f"r6: {r6.status_code} {r6.text[:300]}")
 
 
 if __name__ == "__main__":
