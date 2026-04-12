@@ -121,51 +121,69 @@ def register(day):
         page.wait_for_timeout(3000)
         log.info(f"Registration page loaded. URL: {page.url}")
 
+        def click_in_frames(text, partial=False):
+            """Click a button by text, searching main page and all iframes."""
+            all_frames = [page.main_frame] + page.frames
+            for frame in all_frames:
+                try:
+                    result = frame.evaluate(f"""
+                        () => {{
+                            const els = [...document.querySelectorAll('button, input[type=submit]')];
+                            const match = els.find(e => {{
+                                const t = (e.innerText || e.value || '').trim();
+                                return {'t.includes' if partial else 't ==='}('{text}');
+                            }});
+                            if (match) {{ match.click(); return true; }}
+                            return false;
+                        }}
+                    """)
+                    if result:
+                        log.info(f"Clicked '{text}' in frame: {frame.url[:60]}")
+                        return True
+                except Exception:
+                    pass
+            raise Exception(f"'{text}' button not found in any frame")
+
+        def click_label_in_frames(text):
+            """Click a label by text, searching main page and all iframes."""
+            all_frames = [page.main_frame] + page.frames
+            for frame in all_frames:
+                try:
+                    result = frame.evaluate(f"""
+                        () => {{
+                            const els = [...document.querySelectorAll('label')];
+                            const match = els.find(e => e.innerText.includes('{text}'));
+                            if (match) {{ match.click(); return true; }}
+                            return false;
+                        }}
+                    """)
+                    if result:
+                        log.info(f"Clicked label '{text}' in frame: {frame.url[:60]}")
+                        return True
+                except Exception:
+                    pass
+            log.warning(f"Label '{text}' not found — using default")
+            return False
+
         # ── Step 4: Attendees — click Next ────────────────────────────────────
         log.info("Step 1/3: Clicking Next on Attendees page...")
-        page.evaluate("""
-            () => {
-                const btn = [...document.querySelectorAll('button')]
-                    .find(b => b.textContent.trim() === 'Next');
-                if (btn) btn.click();
-                else throw new Error('Next button not found');
-            }
-        """)
+        page.wait_for_timeout(3000)
+        click_in_frames("Next")
         page.wait_for_timeout(3000)
         log.info(f"URL after Step 1: {page.url}")
 
         # ── Step 5: Fees — select Free pass, click Next ───────────────────────
         log.info("Step 2/3: Selecting free pass and clicking Next...")
-        # Select Rec Surrey Pass (Free) if available
-        page.evaluate("""
-            () => {
-                const labels = [...document.querySelectorAll('label')];
-                const free = labels.find(l => l.textContent.includes('Rec Surrey Pass'));
-                if (free) free.click();
-            }
-        """)
+        click_label_in_frames("Rec Surrey Pass")
         page.wait_for_timeout(500)
-        page.evaluate("""
-            () => {
-                const btn = [...document.querySelectorAll('button')]
-                    .find(b => b.textContent.trim() === 'Next');
-                if (btn) btn.click();
-                else throw new Error('Next button not found on fees page');
-            }
-        """)
+        click_in_frames("Next")
         page.wait_for_timeout(3000)
         log.info(f"URL after Step 2: {page.url}")
 
         # ── Step 6: Payment — click Place My Order ────────────────────────────
         log.info("Step 3/3: Clicking Place My Order...")
-        page.evaluate("""
-            () => {
-                const btn = [...document.querySelectorAll('button')]
-                    .find(b => b.textContent.includes('Place My Order'));
-                if (btn) btn.click();
-                else throw new Error('Place My Order button not found');
-            }
-        """)
+        page.wait_for_timeout(2000)
+        click_in_frames("Place My Order", partial=True)
         page.wait_for_timeout(4000)
         log.info(f"URL after Step 3: {page.url}")
 
