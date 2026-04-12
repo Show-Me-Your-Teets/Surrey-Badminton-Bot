@@ -162,28 +162,44 @@ def register(day: str):
 
             # Submit via JS to bypass visibility/overlay issues
             page.evaluate("document.getElementById('loginradius-submit-login').click()")
-            page.wait_for_load_state("networkidle", timeout=30000)
+
+            # Wait until we leave accounts.surrey.ca (login complete)
+            page.wait_for_url("**/perfectmind.com/**", timeout=30000)
+            page.wait_for_load_state("networkidle", timeout=15000)
             log.info(f"After login, URL: {page.url}")
 
-        # Step 3: Return to registration URL if redirected away after login
-        if "BookMe4EventParticipants" not in page.url:
-            log.info("Navigating back to registration page...")
+        # Step 3: Always navigate to the correct /Clients/ registration URL
+        # (site may land on /Menu/ path after SSO — force the correct /Clients/ path)
+        if "/Clients/BookMe4EventParticipants" not in page.url:
+            log.info(f"Current URL is not registration page, navigating to: {reg_url}")
             page.goto(reg_url, wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(2000)
+            log.info(f"After navigation, URL: {page.url}")
 
-        # Step 4: Click Register / Add to Cart
+        # Step 4: Wait for JS to render, then click Register / Add to Cart
         log.info("Looking for Register button...")
         try:
+            # Give the JS-rendered page time to fully load
+            page.wait_for_timeout(3000)
+
+            # Try multiple selectors used by PerfectMind
             btn = page.locator(
                 'button:has-text("Register"), '
                 'button:has-text("Add to Cart"), '
                 'a:has-text("Register"), '
-                '[class*="register" i]:visible'
+                'input[value="Register"], '
+                '[class*="register" i] button, '
+                '[class*="bookme" i] button'
             ).first
-            btn.wait_for(state="visible", timeout=15000)
-            log.info("Clicking Register button...")
+            btn.wait_for(state="visible", timeout=20000)
+            log.info(f"Register button found. Clicking...")
             btn.click()
             page.wait_for_load_state("networkidle", timeout=15000)
         except PlaywrightTimeout:
+            # Log all buttons visible on page to help debug
+            buttons = page.eval_on_selector_all("button, input[type=submit], a", 
+                "els => els.map(e => e.innerText || e.value || e.href).filter(Boolean).slice(0,20)")
+            log.error(f"Buttons/links found on page: {buttons}")
             page.screenshot(path="debug_screenshot.png")
             log.error("Register button not found. Screenshot saved as debug_screenshot.png")
             log.error(f"URL: {page.url}")
