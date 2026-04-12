@@ -17,48 +17,13 @@ WIDGET_ID = "b4059e75-9755-401f-a7b5-d7c75361420d"
 BASE_URL   = "https://cityofsurrey.perfectmind.com"
 
 SESSIONS = {
-    "monday": {
-        "name":        "Drop In Badminton 13+ - Newton (Mon 6:45pm)",
-        "event_id":    "65abb86d-b638-c9ff-b0f5-64f5db71c690",
-        "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6",
-        "weekday": 0,
-    },
-    "tuesday": {
-        "name":        "Drop In Badminton Adult - Chuck Bailey (Tue 6:30pm)",
-        "event_id":    "0e9a4ac6-2925-85c9-7c73-a0138702c96d",
-        "location_id": "3cdb8e82-fa18-4255-8aba-0ecb93d69da4",
-        "weekday": 1,
-    },
-    "wednesday": {
-        "name":        "Drop In Badminton 13+ - Newton (Wed 7:00pm)",
-        "event_id":    "REPLACE_WITH_WEDNESDAY_EVENT_ID",
-        "location_id": "REPLACE_WITH_WEDNESDAY_LOCATION_ID",
-        "weekday": 2,
-    },
-    "thursday": {
-        "name":        "Drop In Badminton Adult - Guildford (Thu 7:00pm)",
-        "event_id":    "REPLACE_WITH_THURSDAY_EVENT_ID",
-        "location_id": "REPLACE_WITH_THURSDAY_LOCATION_ID",
-        "weekday": 3,
-    },
-    "friday": {
-        "name":        "Drop In Badminton Children with Adult - Guildford (Fri 5:00pm)",
-        "event_id":    "REPLACE_WITH_FRIDAY_EVENT_ID",
-        "location_id": "REPLACE_WITH_FRIDAY_LOCATION_ID",
-        "weekday": 4,
-    },
-    "saturday": {
-        "name":        "Drop In Badminton Adult - Guildford (Sat 6:00pm)",
-        "event_id":    "REPLACE_WITH_SATURDAY_EVENT_ID",
-        "location_id": "REPLACE_WITH_SATURDAY_LOCATION_ID",
-        "weekday": 5,
-    },
-    "sunday": {
-        "name":        "Drop In Badminton Adult - Guildford (Sun 8:30am)",
-        "event_id":    "382ea32a-2d21-5709-a715-8e6cd7562e9a",
-        "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601",
-        "weekday": 6,
-    },
+    "monday":    {"name": "Drop In Badminton 13+ - Newton (Mon 6:45pm)",            "event_id": "65abb86d-b638-c9ff-b0f5-64f5db71c690", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 0},
+    "tuesday":   {"name": "Drop In Badminton Adult - Chuck Bailey (Tue 6:30pm)",    "event_id": "0e9a4ac6-2925-85c9-7c73-a0138702c96d", "location_id": "3cdb8e82-fa18-4255-8aba-0ecb93d69da4", "weekday": 1},
+    "wednesday": {"name": "Drop In Badminton 13+ - Newton (Wed 7:00pm)",            "event_id": "REPLACE_WITH_WEDNESDAY_EVENT_ID",        "location_id": "REPLACE_WITH_WEDNESDAY_LOCATION_ID",  "weekday": 2},
+    "thursday":  {"name": "Drop In Badminton Adult - Guildford (Thu 7:00pm)",       "event_id": "REPLACE_WITH_THURSDAY_EVENT_ID",         "location_id": "REPLACE_WITH_THURSDAY_LOCATION_ID",   "weekday": 3},
+    "friday":    {"name": "Drop In Badminton Children with Adult - Guildford (Fri 5:00pm)", "event_id": "REPLACE_WITH_FRIDAY_EVENT_ID",   "location_id": "REPLACE_WITH_FRIDAY_LOCATION_ID",     "weekday": 4},
+    "saturday":  {"name": "Drop In Badminton Adult - Guildford (Sat 6:00pm)",       "event_id": "REPLACE_WITH_SATURDAY_EVENT_ID",        "location_id": "REPLACE_WITH_SATURDAY_LOCATION_ID",   "weekday": 5},
+    "sunday":    {"name": "Drop In Badminton Adult - Guildford (Sun 8:30am)",       "event_id": "382ea32a-2d21-5709-a715-8e6cd7562e9a", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 6},
 }
 
 
@@ -71,18 +36,80 @@ def get_occurrence_date(session):
     return (now + timedelta(days=days_ahead)).date().strftime("%Y%m%d")
 
 
+def js_click(frame, text, partial=False):
+    """Click a button by text in a specific frame."""
+    cmp = "includes" if partial else "==="
+    return frame.evaluate(f"""
+        () => {{
+            const els = [...document.querySelectorAll('button, input[type=submit]')];
+            const match = els.find(e => {{
+                const t = (e.innerText || e.value || '').trim();
+                return partial ? t.includes('{text}') : t === '{text}';
+            }});
+            if (match) {{ match.click(); return true; }}
+            return false;
+        }}
+    """.replace("partial ? t.includes", f"{'true' if partial else 'false'} ? t.includes"))
+
+
+def click_anywhere(page, text, partial=False):
+    """Click a button searching main frame + all child frames."""
+    for frame in page.frames:
+        try:
+            cmp = "t.includes" if partial else "t ==="
+            result = frame.evaluate(f"""
+                () => {{
+                    const els = [...document.querySelectorAll('button, input[type=submit]')];
+                    const match = els.find(e => {{
+                        const t = (e.innerText || e.value || '').trim();
+                        return {cmp}('{text}');
+                    }});
+                    if (match) {{ match.click(); return true; }}
+                    return false;
+                }}
+            """)
+            if result:
+                log.info(f"Clicked '{text}' in frame: {frame.url[:80]}")
+                return True
+        except Exception:
+            pass
+    raise Exception(f"Button '{text}' not found in any frame")
+
+
+def click_label_anywhere(page, text):
+    """Click a label searching all frames."""
+    for frame in page.frames:
+        try:
+            result = frame.evaluate(f"""
+                () => {{
+                    const els = [...document.querySelectorAll('label')];
+                    const match = els.find(e => e.innerText.includes('{text}'));
+                    if (match) {{ match.click(); return true; }}
+                    return false;
+                }}
+            """)
+            if result:
+                log.info(f"Clicked label '{text}' in frame: {frame.url[:80]}")
+                return True
+        except Exception:
+            pass
+    log.warning(f"Label '{text}' not found — using default selection")
+    return False
+
+
 def register(day):
     email    = os.environ["SURREY_EMAIL"]
     password = os.environ["SURREY_PASSWORD"]
     session  = SESSIONS[day.lower()]
 
     if "REPLACE_WITH" in session["event_id"]:
-        log.error(f"Event ID not set for {day}. Update register.py first.")
+        log.error(f"Event ID not set for {day}.")
         sys.exit(1)
 
     occurrence_date = get_occurrence_date(session)
+    # Use /Menu/ path — this is what the server expects
     reg_url = (
-        f"{BASE_URL}/23615/Clients/BookMe4EventParticipants"
+        f"{BASE_URL}/23615/Menu/BookMe4EventParticipants"
         f"?eventId={session['event_id']}"
         f"&occurrenceDate={occurrence_date}"
         f"&widgetId={WIDGET_ID}"
@@ -98,104 +125,66 @@ def register(day):
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
 
-        # ── Step 1: Go to reg URL → redirects to login ────────────────────────
-        page.goto(reg_url, wait_until="domcontentloaded")
+        # ── Step 1: Go to reg URL → will redirect to login ────────────────────
+        page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
+        log.info(f"Initial URL: {page.url}")
 
-        # ── Step 2: Log in ────────────────────────────────────────────────────
+        # ── Step 2: Login ─────────────────────────────────────────────────────
         if "accounts.surrey.ca" in page.url:
             log.info("Logging in...")
-            page.wait_for_selector("#loginradius-login-emailid", state="attached")
+            page.wait_for_selector("#loginradius-login-emailid", state="attached", timeout=15000)
             page.fill("#loginradius-login-emailid", email)
             page.fill("#loginradius-login-password", password)
             page.evaluate("document.getElementById('loginradius-submit-login').click()")
-            # Wait for the full SSO redirect chain to complete
-            # It goes: accounts.surrey.ca → SessionSignIn → /Menu/ → done
+            # Wait for full redirect chain to complete (accounts → SessionSignIn → /Menu/)
             page.wait_for_load_state("networkidle", timeout=30000)
             page.wait_for_timeout(2000)
-            log.info(f"Logged in. URL: {page.url}")
+            log.info(f"After login URL: {page.url}")
 
-        # ── Step 3: Force navigate to /Clients/ reg URL (authenticated) ───────
-        log.info("Loading registration page...")
-        page.goto(reg_url, wait_until="networkidle", timeout=30000)
-        page.wait_for_timeout(3000)
-        log.info(f"Registration page loaded. URL: {page.url}")
+        # ── Step 3: If needed, navigate to reg page again ─────────────────────
+        if "BookMe4EventParticipants" not in page.url:
+            log.info("Navigating to registration page...")
+            page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
 
-        def click_in_frames(text, partial=False):
-            """Click a button by text, searching main page and all iframes."""
-            all_frames = [page.main_frame] + page.frames
-            for frame in all_frames:
-                try:
-                    result = frame.evaluate(f"""
-                        () => {{
-                            const els = [...document.querySelectorAll('button, input[type=submit]')];
-                            const match = els.find(e => {{
-                                const t = (e.innerText || e.value || '').trim();
-                                return {'t.includes' if partial else 't ==='}('{text}');
-                            }});
-                            if (match) {{ match.click(); return true; }}
-                            return false;
-                        }}
-                    """)
-                    if result:
-                        log.info(f"Clicked '{text}' in frame: {frame.url[:60]}")
-                        return True
-                except Exception:
-                    pass
-            raise Exception(f"'{text}' button not found in any frame")
-
-        def click_label_in_frames(text):
-            """Click a label by text, searching main page and all iframes."""
-            all_frames = [page.main_frame] + page.frames
-            for frame in all_frames:
-                try:
-                    result = frame.evaluate(f"""
-                        () => {{
-                            const els = [...document.querySelectorAll('label')];
-                            const match = els.find(e => e.innerText.includes('{text}'));
-                            if (match) {{ match.click(); return true; }}
-                            return false;
-                        }}
-                    """)
-                    if result:
-                        log.info(f"Clicked label '{text}' in frame: {frame.url[:60]}")
-                        return True
-                except Exception:
-                    pass
-            log.warning(f"Label '{text}' not found — using default")
-            return False
+        log.info(f"Registration page URL: {page.url}")
 
         # ── Step 4: Attendees — click Next ────────────────────────────────────
-        log.info("Step 1/3: Clicking Next on Attendees page...")
+        log.info("Step 1/3: Clicking Next (Attendees)...")
         page.wait_for_timeout(3000)
-        click_in_frames("Next")
-        page.wait_for_timeout(3000)
+        click_anywhere(page, "Next")
+        page.wait_for_load_state("networkidle", timeout=15000)
+        page.wait_for_timeout(2000)
         log.info(f"URL after Step 1: {page.url}")
 
         # ── Step 5: Fees — select Free pass, click Next ───────────────────────
-        log.info("Step 2/3: Selecting free pass and clicking Next...")
-        click_label_in_frames("Rec Surrey Pass")
+        log.info("Step 2/3: Selecting free pass, clicking Next (Fees)...")
+        page.wait_for_timeout(2000)
+        click_label_anywhere(page, "Rec Surrey Pass")
         page.wait_for_timeout(500)
-        click_in_frames("Next")
-        page.wait_for_timeout(3000)
+        click_anywhere(page, "Next")
+        page.wait_for_load_state("networkidle", timeout=15000)
+        page.wait_for_timeout(2000)
         log.info(f"URL after Step 2: {page.url}")
 
-        # ── Step 6: Payment — click Place My Order ────────────────────────────
-        log.info("Step 3/3: Clicking Place My Order...")
+        # ── Step 6: Payment — Place My Order ─────────────────────────────────
+        log.info("Step 3/3: Clicking Place My Order (Payment)...")
         page.wait_for_timeout(2000)
-        click_in_frames("Place My Order", partial=True)
-        page.wait_for_timeout(4000)
+        click_anywhere(page, "Place My Order", partial=True)
+        page.wait_for_load_state("networkidle", timeout=20000)
+        page.wait_for_timeout(3000)
         log.info(f"URL after Step 3: {page.url}")
 
-        # ── Confirm success ───────────────────────────────────────────────────
+        # ── Confirm ───────────────────────────────────────────────────────────
         body = page.inner_text("body").lower()
         if "thank you" in body:
-            log.info("✅ Successfully registered! Saw 'Thank you' confirmation.")
+            log.info("✅ Registration successful! 'Thank you' page confirmed.")
         elif "already registered" in body:
             log.info("✅ Already registered for this session.")
         else:
             page.screenshot(path="debug.png")
-            log.warning("⚠️ Could not confirm success. Screenshot saved as debug.png")
+            log.warning("⚠️ Could not confirm. Screenshot saved as debug.png")
 
         browser.close()
 
