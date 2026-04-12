@@ -163,18 +163,21 @@ def register(day: str):
             # Submit via JS to bypass visibility/overlay issues
             page.evaluate("document.getElementById('loginradius-submit-login').click()")
 
-            # Wait until we leave accounts.surrey.ca (login complete)
-            page.wait_for_url("**/perfectmind.com/**", timeout=30000)
-            page.wait_for_load_state("networkidle", timeout=15000)
+            # Wait for SSO to redirect away from accounts.surrey.ca
+            # The site lands on /Menu/ path — that is expected, we fix it in Step 3
+            try:
+                page.wait_for_function("() => !window.location.href.includes('accounts.surrey.ca')", timeout=30000)
+            except Exception:
+                pass
+            page.wait_for_timeout(2000)
             log.info(f"After login, URL: {page.url}")
 
-        # Step 3: Always navigate to the correct /Clients/ registration URL
-        # (site may land on /Menu/ path after SSO — force the correct /Clients/ path)
-        if "/Clients/BookMe4EventParticipants" not in page.url:
-            log.info(f"Current URL is not registration page, navigating to: {reg_url}")
-            page.goto(reg_url, wait_until="networkidle", timeout=30000)
-            page.wait_for_timeout(2000)
-            log.info(f"After navigation, URL: {page.url}")
+        # Step 3: Always force navigate to the correct /Clients/ registration URL
+        # Surrey SSO always redirects to /Menu/ — we must manually go to /Clients/
+        log.info(f"Forcing navigation to registration page...")
+        page.goto(reg_url, wait_until="networkidle", timeout=30000)
+        page.wait_for_timeout(3000)
+        log.info(f"After navigation, URL: {page.url}")
 
         # Step 4: Wait for JS to render, then click Register / Add to Cart
         log.info("Looking for Register button...")
