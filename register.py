@@ -136,17 +136,11 @@ def register(day):
             page.wait_for_selector("#loginradius-login-emailid", state="attached", timeout=15000)
             page.fill("#loginradius-login-emailid", email)
             page.fill("#loginradius-login-password", password)
-            page.evaluate("document.getElementById('loginradius-submit-login').click()")
-            # Wait for full redirect chain to complete (accounts → SessionSignIn → /Menu/)
-            page.wait_for_load_state("networkidle", timeout=30000)
+            # Use proper click + wait for navigation instead of JS click
+            with page.expect_navigation(wait_until="networkidle", timeout=30000):
+                page.click("#loginradius-submit-login")
             page.wait_for_timeout(2000)
             log.info(f"After login URL: {page.url}")
-
-        # ── Step 3: If needed, navigate to reg page again ─────────────────────
-        if "BookMe4EventParticipants" not in page.url:
-            log.info("Navigating to registration page...")
-            page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(3000)
 
         log.info(f"Registration page URL: {page.url}")
 
