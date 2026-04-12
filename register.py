@@ -70,14 +70,21 @@ def register(day):
         # ── Step 2: Login ─────────────────────────────────────────────────────
         if "accounts.surrey.ca" in page.url:
             log.info("Logging in...")
-            # Wait for LoginRadius to fully render the form (it loads async via JS)
-            page.wait_for_selector("#loginradius-login-emailid", state="visible", timeout=20000)
+            # Wait for LoginRadius form fields to appear
+            page.wait_for_selector("#loginradius-login-emailid", state="attached", timeout=20000)
             page.fill("#loginradius-login-emailid", email)
             page.fill("#loginradius-login-password", password)
-            # Also wait for submit button to be visible before clicking
-            page.wait_for_selector("#loginradius-submit-login", state="visible", timeout=10000)
-            page.click("#loginradius-submit-login")
-            # Wait until we leave accounts.surrey.ca
+            # Submit button is hidden by CSS — unhide it and click via JS
+            page.evaluate("""
+                () => {
+                    const btn = document.getElementById('loginradius-submit-login');
+                    btn.style.display = 'block';
+                    btn.style.visibility = 'visible';
+                    btn.style.opacity = '1';
+                    btn.click();
+                }
+            """)
+            # Wait until we land on perfectmind
             page.wait_for_url("*perfectmind.com*", timeout=30000)
             page.wait_for_load_state("networkidle", timeout=15000)
             log.info(f"After login URL: {page.url}")
