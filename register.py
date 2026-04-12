@@ -1,6 +1,12 @@
 """
 Surrey Recreation - Badminton Auto-Registration Bot
-Logs in via MySurrey SSO and registers for drop-in badminton.
+
+Flow:
+  1. Go to registration URL → redirected to login
+  2. Log in → navigate back to registration URL (now authenticated)
+  3. Step 1 (Attendees): Sourav Gandhi is pre-checked → click Next
+  4. Step 2 (Fees): Select "CRS - Drop In Sport - Rec Surrey Pass" (Free) → click Next
+  5. Step 3 (Payment): Click "Place My Order"
 
 Usage:
     python register.py --day monday
@@ -28,11 +34,10 @@ log = logging.getLogger(__name__)
 
 WIDGET_ID = "b4059e75-9755-401f-a7b5-d7c75361420d"
 BASE_URL   = "https://cityofsurrey.perfectmind.com"
-LOGIN_URL  = "https://accounts.surrey.ca/auth.aspx?loginflow=prcms&url=https://cityofsurrey.perfectmind.com"
 
 # ── Fill in event_id and location_id for each day ────────────────────────────
-# How to find them: go to the Surrey registration site, navigate to a session,
-# click Register, and copy the URL. Extract eventId=... and locationId=... values.
+# How to find: go to Surrey registration site, navigate to a session,
+# click Register, copy the URL, extract eventId=... and locationId=...
 SESSIONS = {
     "monday": {
         "name":        "Drop In Badminton 13+ - Newton Recreation Centre (Mon 6:45pm)",
@@ -115,6 +120,23 @@ def build_registration_url(session: dict, occurrence_date: str) -> str:
     )
 
 
+def save_debug(page, label="debug"):
+    path = f"{label}_screenshot.png"
+    page.screenshot(path=path)
+    log.error(f"Screenshot saved: {path}")
+    log.error(f"Current URL: {page.url}")
+    log.error(f"Page title: {page.title()}")
+    # Log visible buttons to help diagnose
+    try:
+        buttons = page.eval_on_selector_all(
+            "button:visible, input[type=submit]:visible, a:visible",
+            "els => els.map(e => (e.innerText || e.value || '').trim()).filter(Boolean).slice(0, 15)"
+        )
+        log.error(f"Visible buttons/links: {buttons}")
+    except Exception:
+        pass
+
+
 def register(day: str):
     email    = os.environ.get("SURREY_EMAIL")
     password = os.environ.get("SURREY_PASSWORD")
@@ -128,6 +150,10 @@ def register(day: str):
         log.error(f"Unknown day: {day}. Choose from: {list(SESSIONS.keys())}")
         sys.exit(1)
 
+    if "REPLACE_WITH" in session["event_id"]:
+        log.error(f"Event ID not set for {day}. Please update register.py with the correct event_id and location_id.")
+        sys.exit(1)
+
     occurrence_date = get_occurrence_date(session)
     reg_url = build_registration_url(session, occurrence_date)
 
@@ -138,107 +164,134 @@ def register(day: str):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": 1280, "height": 900},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
         )
         page = context.new_page()
 
-        # Step 1: Go to registration URL (redirects to login if not authed)
-        log.info("Navigating to registration page...")
-        page.goto(reg_url, wait_until="networkidle", timeout=30000)
+        # ── PHASE 1: Login ────────────────────────────────────────────────────
+        # Go to registration URL — it will redirect to login
+        log.info("Navigating to registration URL (expecting login redirect)...")
+        page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(2000)
 
-        # Step 2: Log in if redirected to login page
         if "accounts.surrey.ca" in page.url or "login" in page.url.lower():
-            log.info("Login page detected. Signing in...")
+            log.info("Login page detected. Filling credentials...")
 
-            # Wait for LoginRadius form to fully render
             page.wait_for_selector('input[id="loginradius-login-emailid"]', state="visible", timeout=15000)
             page.fill('input[id="loginradius-login-emailid"]', email)
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(300)
 
-            page.wait_for_selector('input[id="loginradius-login-password"]', state="visible", timeout=10000)
             page.fill('input[id="loginradius-login-password"]', password)
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(300)
 
-            # Submit via JS to bypass visibility/overlay issues
+            log.info("Submitting login form...")
             page.evaluate("document.getElementById('loginradius-submit-login').click()")
 
-            # Wait for SSO to redirect away from accounts.surrey.ca
-            # The site lands on /Menu/ path — that is expected, we fix it in Step 3
+            # Wait until browser leaves accounts.surrey.ca
             try:
-                page.wait_for_function("() => !window.location.href.includes('accounts.surrey.ca')", timeout=30000)
-            except Exception:
-                pass
-            page.wait_for_timeout(2000)
-            log.info(f"After login, URL: {page.url}")
+                page.wait_for_function(
+                    "() => !window.location.href.includes('accounts.surrey.ca')",
+                    timeout=30000
+                )
+            except Exception as e:
+                log.warning(f"Wait for redirect timed out: {e} — continuing anyway")
 
-        # Step 3: Always force navigate to the correct /Clients/ registration URL
-        # Surrey SSO always redirects to /Menu/ — we must manually go to /Clients/
-        log.info(f"Forcing navigation to registration page...")
+            page.wait_for_timeout(2000)
+            log.info(f"After login URL: {page.url}")
+        else:
+            log.info("Already logged in, no login page shown.")
+
+        # ── PHASE 2: Navigate to registration page (now authenticated) ────────
+        log.info("Navigating to registration page (now authenticated)...")
         page.goto(reg_url, wait_until="networkidle", timeout=30000)
         page.wait_for_timeout(3000)
-        log.info(f"After navigation, URL: {page.url}")
+        log.info(f"Registration page URL: {page.url}")
 
-        # Step 4: Wait for JS to render, then click Register / Add to Cart
-        log.info("Looking for Register button...")
-        try:
-            # Give the JS-rendered page time to fully load
-            page.wait_for_timeout(3000)
-
-            # Try multiple selectors used by PerfectMind
-            btn = page.locator(
-                'button:has-text("Register"), '
-                'button:has-text("Add to Cart"), '
-                'a:has-text("Register"), '
-                'input[value="Register"], '
-                '[class*="register" i] button, '
-                '[class*="bookme" i] button'
-            ).first
-            btn.wait_for(state="visible", timeout=20000)
-            log.info(f"Register button found. Clicking...")
-            btn.click()
-            page.wait_for_load_state("networkidle", timeout=15000)
-        except PlaywrightTimeout:
-            # Log all buttons visible on page to help debug
-            buttons = page.eval_on_selector_all("button, input[type=submit], a", 
-                "els => els.map(e => e.innerText || e.value || e.href).filter(Boolean).slice(0,20)")
-            log.error(f"Buttons/links found on page: {buttons}")
-            page.screenshot(path="debug_screenshot.png")
-            log.error("Register button not found. Screenshot saved as debug_screenshot.png")
-            log.error(f"URL: {page.url}")
+        # Check if we got bounced to login again (shouldn't happen, but just in case)
+        if "accounts.surrey.ca" in page.url:
+            log.error("Still being redirected to login after authentication. Check credentials.")
+            save_debug(page, "login_failed")
             browser.close()
             sys.exit(1)
 
-        # Step 5: Confirm / Checkout if needed
+        # ── STEP 1: Attendees — click Next ────────────────────────────────────
+        log.info("Step 1: Attendees page — clicking Next...")
         try:
-            confirm = page.locator(
-                'button:has-text("Confirm"), button:has-text("Complete"), '
-                'button:has-text("Checkout"), button:has-text("Proceed")'
-            ).first
-            if confirm.is_visible(timeout=5000):
-                log.info("Clicking confirmation button...")
-                confirm.click()
-                page.wait_for_load_state("networkidle", timeout=15000)
-        except Exception:
-            pass
+            next_btn = page.locator('button:has-text("Next")').first
+            next_btn.wait_for(state="visible", timeout=15000)
+            next_btn.click()
+            page.wait_for_load_state("networkidle", timeout=15000)
+            page.wait_for_timeout(2000)
+            log.info(f"After Step 1 Next, URL: {page.url}")
+        except PlaywrightTimeout:
+            log.error("Could not find Next button on Attendees page.")
+            save_debug(page, "step1_failed")
+            browser.close()
+            sys.exit(1)
 
-        # Step 6: Check for success
+        # ── STEP 2: Fees & Extras — select Free pass, click Next ──────────────
+        log.info("Step 2: Fees page — selecting Rec Surrey Pass (Free)...")
+        try:
+            # Look for the free/Rec Surrey Pass radio button
+            free_pass = page.locator(
+                'label:has-text("Rec Surrey Pass"), '
+                'label:has-text("CRS - Drop In Sport - Rec Surrey Pass"), '
+                'input[type="radio"] + label:has-text("Free")'
+            ).first
+
+            if free_pass.is_visible(timeout=5000):
+                free_pass.click()
+                log.info("Selected Rec Surrey Pass (Free)")
+                page.wait_for_timeout(500)
+            else:
+                log.info("Free pass option not visible — proceeding with default selection")
+
+            next_btn = page.locator('button:has-text("Next")').first
+            next_btn.wait_for(state="visible", timeout=10000)
+            next_btn.click()
+            page.wait_for_load_state("networkidle", timeout=15000)
+            page.wait_for_timeout(2000)
+            log.info(f"After Step 2 Next, URL: {page.url}")
+        except PlaywrightTimeout:
+            log.error("Could not complete Fees page.")
+            save_debug(page, "step2_failed")
+            browser.close()
+            sys.exit(1)
+
+        # ── STEP 3: Payment — click Place My Order ────────────────────────────
+        log.info("Step 3: Payment page — clicking Place My Order...")
+        try:
+            place_order = page.locator('button:has-text("Place My Order")').first
+            place_order.wait_for(state="visible", timeout=15000)
+            place_order.click()
+            page.wait_for_load_state("networkidle", timeout=20000)
+            page.wait_for_timeout(2000)
+            log.info(f"After Place My Order, URL: {page.url}")
+        except PlaywrightTimeout:
+            log.error("Could not find Place My Order button.")
+            save_debug(page, "step3_failed")
+            browser.close()
+            sys.exit(1)
+
+        # ── Verify success ────────────────────────────────────────────────────
         page_text = page.inner_text("body").lower()
-        if any(kw in page_text for kw in ["already registered", "you are registered"]):
+        if "thank you" in page_text:
+            log.info("✅ Successfully registered! Confirmation page says 'Thank you'.")
+        elif "already registered" in page_text or "you are registered" in page_text:
             log.info("✅ Already registered for this session.")
-        elif any(kw in page_text for kw in ["registered", "confirmed", "success", "receipt", "thank you", "booked"]):
-            log.info("✅ Successfully registered!")
         else:
-            page.screenshot(path="debug_screenshot.png")
-            log.warning("⚠️  Could not confirm registration. Check debug_screenshot.png")
-            log.warning(f"Final URL: {page.url}")
+            save_debug(page, "unknown_result")
+            log.warning("⚠️ Could not confirm registration. Check screenshot.")
 
         browser.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--day", required=True,
-                        help="Day to register: monday/tuesday/wednesday/thursday/friday/saturday/sunday")
+    parser.add_argument(
+        "--day", required=True,
+        help="Day: monday/tuesday/wednesday/thursday/friday/saturday/sunday"
+    )
     args = parser.parse_args()
     register(args.day)
