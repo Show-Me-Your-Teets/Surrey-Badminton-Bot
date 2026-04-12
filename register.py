@@ -138,34 +138,30 @@ def register(day):
         # ── Step 1: Attendees — click Next ────────────────────────────────────
         log.info("Step 1/3: Clicking Next (Attendees)...")
         page.wait_for_timeout(2000)
-        if not js_click(page, "Next"):
-            log.error("Next button not found!")
-            for i, frame in enumerate(page.frames):
-                try:
-                    btns = frame.evaluate("() => [...document.querySelectorAll('button')].map(b => b.textContent.trim()).filter(Boolean)")
-                    log.info(f"Frame {i}: {btns}")
-                except Exception:
-                    pass
-            sys.exit(1)
-
-        page.wait_for_timeout(3000)
-        log.info(f"URL after Step 1: {page.url}")
+        js_click(page, "Next")
+        log.info("Clicked Next on Step 1, waiting for Step 2 to load...")
+        page.wait_for_timeout(4000)
 
         # ── Step 2: Fees — select free pass, click Next ───────────────────────
         log.info("Step 2/3: Selecting free pass, clicking Next (Fees)...")
-        page.wait_for_timeout(2000)
+        # Dismiss any new popup first
+        if js_click(page, "Continue"):
+            log.info("Dismissed popup on Step 2")
+            page.wait_for_timeout(2000)
         js_click(page, "Rec Surrey Pass", partial=True)
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(1000)
         js_click(page, "Next")
-        page.wait_for_timeout(3000)
-        log.info(f"URL after Step 2: {page.url}")
+        log.info("Clicked Next on Step 2, waiting for Step 3 to load...")
+        page.wait_for_timeout(4000)
 
         # ── Step 3: Payment — Place My Order ─────────────────────────────────
         log.info("Step 3/3: Clicking Place My Order...")
-        page.wait_for_timeout(2000)
+        if js_click(page, "Continue"):
+            log.info("Dismissed popup on Step 3")
+            page.wait_for_timeout(2000)
         js_click(page, "Place My Order", partial=True)
-        page.wait_for_timeout(4000)
-        log.info(f"URL after Step 3: {page.url}")
+        page.wait_for_timeout(5000)
+        log.info(f"Final URL: {page.url}")
 
         # ── Confirm success ───────────────────────────────────────────────────
         body = page.inner_text("body").lower()
