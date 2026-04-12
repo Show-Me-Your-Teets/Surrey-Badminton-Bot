@@ -95,30 +95,61 @@ def register(day):
         page.wait_for_timeout(3000)
         log.info(f"Reg page URL: {page.url}")
 
+        def js_click_button(text, partial=False):
+            """Find and click a button across all frames using JS."""
+            for frame in page.frames:
+                try:
+                    found = frame.evaluate(f"""() => {{
+                        const btns = [...document.querySelectorAll('button')];
+                        const btn = btns.find(b => {'b.textContent.includes' if partial else 'b.textContent.trim() ==='}('{text}'));
+                        if (btn) {{ btn.click(); return true; }}
+                        return false;
+                    }}""")
+                    if found:
+                        log.info(f"Clicked '{text}' in frame: {frame.url[:70]}")
+                        return
+                except Exception:
+                    pass
+            raise Exception(f"Button '{text}' not found in any frame")
+
+        def js_click_label(text):
+            """Find and click a label across all frames using JS."""
+            for frame in page.frames:
+                try:
+                    found = frame.evaluate(f"""() => {{
+                        const labels = [...document.querySelectorAll('label')];
+                        const label = labels.find(l => l.textContent.includes('{text}'));
+                        if (label) {{ label.click(); return true; }}
+                        return false;
+                    }}""")
+                    if found:
+                        log.info(f"Clicked label '{text}' in frame: {frame.url[:70]}")
+                        return
+                except Exception:
+                    pass
+            log.warning(f"Label '{text}' not found, using default")
+
         # ── Step 4: Click Next (Attendees) ────────────────────────────────────
         log.info("Step 1/3: Clicking Next...")
-        page.locator("button", has_text="Next").click(force=True)
-        page.wait_for_load_state("networkidle", timeout=15000)
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(3000)
+        js_click_button("Next")
+        page.wait_for_timeout(3000)
         log.info(f"URL after Step 1: {page.url}")
 
         # ── Step 5: Select free pass, click Next (Fees) ───────────────────────
         log.info("Step 2/3: Selecting free pass, clicking Next...")
-        try:
-            page.locator("label", has_text="Rec Surrey Pass").click(force=True)
-            page.wait_for_timeout(500)
-        except Exception:
-            log.info("Free pass label not found, using default")
-        page.locator("button", has_text="Next").click(force=True)
-        page.wait_for_load_state("networkidle", timeout=15000)
         page.wait_for_timeout(2000)
+        js_click_label("Rec Surrey Pass")
+        page.wait_for_timeout(500)
+        js_click_button("Next")
+        page.wait_for_timeout(3000)
         log.info(f"URL after Step 2: {page.url}")
 
         # ── Step 6: Place My Order (Payment) ──────────────────────────────────
         log.info("Step 3/3: Clicking Place My Order...")
-        page.locator("button", has_text="Place My Order").click(force=True)
-        page.wait_for_load_state("networkidle", timeout=20000)
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(2000)
+        js_click_button("Place My Order", partial=True)
+        page.wait_for_timeout(4000)
         log.info(f"URL after Step 3: {page.url}")
 
         # ── Confirm ───────────────────────────────────────────────────────────
