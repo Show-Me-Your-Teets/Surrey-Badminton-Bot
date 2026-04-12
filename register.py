@@ -84,15 +84,18 @@ def register(day):
                     btn.click();
                 }
             """)
-            # Wait for page to settle after login redirect
-            page.wait_for_load_state("domcontentloaded", timeout=30000)
+            # Wait for redirect away from accounts.surrey.ca
+            for _ in range(30):
+                page.wait_for_timeout(1000)
+                if "accounts.surrey.ca" not in page.url:
+                    break
             page.wait_for_timeout(2000)
             log.info(f"After login URL: {page.url}")
 
         # ── Step 3: Navigate to reg page (authenticated) ──────────────────────
         log.info("Loading registration page...")
-        page.goto(reg_url, wait_until="networkidle", timeout=30000)
-        page.wait_for_timeout(3000)
+        page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(5000)
         log.info(f"Reg page URL: {page.url}")
 
         def js_click_button(text, partial=False):
