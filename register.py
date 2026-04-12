@@ -123,20 +123,21 @@ def register(day):
         page.wait_for_timeout(5000)
         log.info(f"Reg page URL: {page.url}")
 
-        # Dismiss any popup (e.g. "already have item in cart" dialog)
+        # Dismiss any "already have item in cart" popup first
+        page.wait_for_timeout(1000)
         if js_click(page, "Continue"):
             log.info("Dismissed popup (clicked Continue)")
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
         elif js_click(page, "Add Anyway"):
             log.info("Dismissed popup (clicked Add Anyway)")
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
 
         # Take screenshot for debugging
         page.screenshot(path="debug.png")
 
         # ── Step 1: Attendees — click Next ────────────────────────────────────
         log.info("Step 1/3: Clicking Next (Attendees)...")
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(2000)
         if not js_click(page, "Next"):
             log.error("Next button not found!")
             for i, frame in enumerate(page.frames):
