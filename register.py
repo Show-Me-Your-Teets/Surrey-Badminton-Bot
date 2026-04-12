@@ -150,10 +150,20 @@ def register(day: str):
         # Step 2: Log in if redirected to login page
         if "accounts.surrey.ca" in page.url or "login" in page.url.lower():
             log.info("Login page detected. Signing in...")
-            page.fill('input[type="email"], input[name="email"], input[id*="email" i]', email)
-            page.fill('input[type="password"]', password)
-            page.click('button[type="submit"], input[type="submit"]')
-            page.wait_for_load_state("networkidle", timeout=20000)
+
+            # Wait for LoginRadius form to fully render
+            page.wait_for_selector('input[id="loginradius-login-emailid"]', state="visible", timeout=15000)
+            page.fill('input[id="loginradius-login-emailid"]', email)
+            page.wait_for_timeout(500)
+
+            page.wait_for_selector('input[id="loginradius-login-password"]', state="visible", timeout=10000)
+            page.fill('input[id="loginradius-login-password"]', password)
+            page.wait_for_timeout(500)
+
+            # Submit via JS to bypass visibility/overlay issues
+            page.evaluate("document.getElementById('loginradius-submit-login').click()")
+            page.wait_for_load_state("networkidle", timeout=30000)
+            log.info(f"After login, URL: {page.url}")
 
         # Step 3: Return to registration URL if redirected away after login
         if "BookMe4EventParticipants" not in page.url:
