@@ -215,37 +215,95 @@ def register(day: str):
             browser.close()
             sys.exit(1)
 
-        def click_button(text, timeout=15000):
-            """Click a button by text, searching both main page and all frames."""
-            # Try main page first
-            btn = page.locator(f'button:has-text("{text}")').first
+        def log_page_state(label=""):
+            """Log all frames and their visible buttons for diagnostics."""
+            log.info(f"--- Page state {label} ---")
+            log.info(f"Main URL: {page.url}")
+            log.info(f"Frames: {[f.url for f in page.frames]}")
+            for i, frame in enumerate(page.frames):
+                try:
+                    btns = frame.eval_on_selector_all(
+                        "button, input[type=submit], a[class*='btn'], label",
+                        "els => els.map(e => (e.innerText || e.value || '').trim()).filter(Boolean).slice(0,20)"
+                    )
+                    if btns:
+                        log.info(f"Frame {i} ({frame.url[:60]}): {btns}")
+                except Exception:
+                    pass
+
+        def click_button(text):
+            """Click a button by text — tries main page, all frames, then JS fallback."""
+            # 1. Try main page
             try:
+                btn = page.locator(f'button:has-text("{text}")').first
                 btn.wait_for(state="visible", timeout=3000)
                 btn.click()
+                log.info(f"Clicked '{text}' on main page")
                 return True
             except Exception:
                 pass
-            # Try each iframe
-            for frame in page.frames:
+
+            # 2. Try each iframe
+            for i, frame in enumerate(page.frames):
                 try:
                     fb = frame.locator(f'button:has-text("{text}")').first
                     fb.wait_for(state="visible", timeout=3000)
                     fb.click()
+                    log.info(f"Clicked '{text}' in frame {i}")
                     return True
                 except Exception:
                     pass
-            raise PlaywrightTimeout(f"Button '{text}' not found in page or any frame")
 
-        def click_label(text, timeout=8000):
-            """Click a label by text, searching both main page and all frames."""
-            for frame in [page] + page.frames:
+            # 3. JS fallback — find any element whose text matches across all frames
+            for i, frame in enumerate(page.frames):
+                try:
+                    clicked = frame.evaluate(f"""
+                        () => {{
+                            const els = [...document.querySelectorAll('button, input[type=submit], a')];
+                            const match = els.find(e => (e.innerText || e.value || '').trim().toLowerCase().includes('{text.lower()}'));
+                            if (match) {{ match.click(); return true; }}
+                            return false;
+                        }}
+                    """)
+                    if clicked:
+                        log.info(f"Clicked '{text}' via JS in frame {i}")
+                        return True
+                except Exception:
+                    pass
+
+            raise Exception(f"Button '{text}' not found anywhere on the page")
+
+        def click_label(text):
+            """Click a label/radio by text — tries main page, all frames, then JS fallback."""
+            # 1. Try all frames with locator
+            for i, frame in enumerate([page] + page.frames):
                 try:
                     el = frame.locator(f'label:has-text("{text}")').first
                     if el.is_visible(timeout=2000):
                         el.click()
+                        log.info(f"Clicked label '{text}' in frame {i}")
                         return True
                 except Exception:
                     pass
+
+            # 2. JS fallback
+            for i, frame in enumerate([page] + page.frames):
+                try:
+                    clicked = frame.evaluate(f"""
+                        () => {{
+                            const els = [...document.querySelectorAll('label, input[type=radio]')];
+                            const match = els.find(e => (e.innerText || '').toLowerCase().includes('{text.lower()}'));
+                            if (match) {{ match.click(); return true; }}
+                            return false;
+                        }}
+                    """)
+                    if clicked:
+                        log.info(f"Clicked label '{text}' via JS in frame {i}")
+                        return True
+                except Exception:
+                    pass
+
+            log.warning(f"Label '{text}' not found — continuing with default")
             return False
 
         # ── STEP 1: Attendees — click Next ────────────────────────────────────
@@ -253,6 +311,7 @@ def register(day: str):
         try:
             # Extra wait for JS-rendered content inside frames
             page.wait_for_timeout(3000)
+            log_page_state("before Step 1")
             click_button("Next")
             page.wait_for_load_state("networkidle", timeout=15000)
             page.wait_for_timeout(2000)
@@ -267,6 +326,7 @@ def register(day: str):
         log.info("Step 2: Fees page — selecting Rec Surrey Pass (Free)...")
         try:
             page.wait_for_timeout(2000)
+            log_page_state("before Step 2")
             # Select the free Rec Surrey Pass option
             selected = click_label("Rec Surrey Pass")
             if selected:
@@ -289,6 +349,7 @@ def register(day: str):
         log.info("Step 3: Payment page — clicking Place My Order...")
         try:
             page.wait_for_timeout(2000)
+            log_page_state("before Step 3")
             click_button("Place My Order")
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(2000)
