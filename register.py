@@ -70,11 +70,13 @@ def register(day):
         # ── Step 2: Login ─────────────────────────────────────────────────────
         if "accounts.surrey.ca" in page.url:
             log.info("Logging in...")
-            page.wait_for_selector("#loginradius-login-emailid", state="attached", timeout=15000)
+            # Wait for LoginRadius to fully render the form (it loads async via JS)
+            page.wait_for_selector("#loginradius-login-emailid", state="visible", timeout=20000)
             page.fill("#loginradius-login-emailid", email)
             page.fill("#loginradius-login-password", password)
-            # force=True bypasses Playwright's visibility check on the submit button
-            page.click("#loginradius-submit-login", force=True)
+            # Also wait for submit button to be visible before clicking
+            page.wait_for_selector("#loginradius-submit-login", state="visible", timeout=10000)
+            page.click("#loginradius-submit-login")
             # Wait until we leave accounts.surrey.ca
             page.wait_for_url("*perfectmind.com*", timeout=30000)
             page.wait_for_load_state("networkidle", timeout=15000)
