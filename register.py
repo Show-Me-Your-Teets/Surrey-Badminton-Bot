@@ -153,7 +153,10 @@ def register(day):
         # ── Step 4: Attendees — click Next ────────────────────────────────────
         log.info("Step 1/3: Clicking Next (Attendees)...")
         page.wait_for_timeout(3000)
-        click_anywhere(page, "Next")
+        # Wait for Next button to be present then click it directly
+        next_btn = page.get_by_role("button", name="Next")
+        next_btn.wait_for(state="attached", timeout=15000)
+        next_btn.click()
         page.wait_for_load_state("networkidle", timeout=15000)
         page.wait_for_timeout(2000)
         log.info(f"URL after Step 1: {page.url}")
@@ -163,7 +166,9 @@ def register(day):
         page.wait_for_timeout(2000)
         click_label_anywhere(page, "Rec Surrey Pass")
         page.wait_for_timeout(500)
-        click_anywhere(page, "Next")
+        next_btn2 = page.get_by_role("button", name="Next")
+        next_btn2.wait_for(state="attached", timeout=10000)
+        next_btn2.click()
         page.wait_for_load_state("networkidle", timeout=15000)
         page.wait_for_timeout(2000)
         log.info(f"URL after Step 2: {page.url}")
@@ -171,7 +176,9 @@ def register(day):
         # ── Step 6: Payment — Place My Order ─────────────────────────────────
         log.info("Step 3/3: Clicking Place My Order (Payment)...")
         page.wait_for_timeout(2000)
-        click_anywhere(page, "Place My Order", partial=True)
+        place_btn = page.get_by_role("button", name="Place My Order")
+        place_btn.wait_for(state="attached", timeout=15000)
+        place_btn.click()
         page.wait_for_load_state("networkidle", timeout=20000)
         page.wait_for_timeout(3000)
         log.info(f"URL after Step 3: {page.url}")
