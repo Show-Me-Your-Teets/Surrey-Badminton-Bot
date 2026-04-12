@@ -84,9 +84,9 @@ def register(day):
                     btn.click();
                 }
             """)
-            # Wait until we land on perfectmind
-            page.wait_for_url("*perfectmind.com*", timeout=30000)
-            page.wait_for_load_state("networkidle", timeout=15000)
+            # Wait for page to settle after login redirect
+            page.wait_for_load_state("domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2000)
             log.info(f"After login URL: {page.url}")
 
         # ── Step 3: Navigate to reg page (authenticated) ──────────────────────
