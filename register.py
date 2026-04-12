@@ -271,6 +271,26 @@ def register(day: str):
                 except Exception:
                     pass
 
+            # 4. Last resort — dispatch a real click event (bypasses visibility checks)
+            for i, frame in enumerate(page.frames):
+                try:
+                    clicked = frame.evaluate(f"""
+                        () => {{
+                            const els = [...document.querySelectorAll('button, input[type=submit], a')];
+                            const match = els.find(e => (e.innerText || e.value || '').trim().toLowerCase().includes('{text.lower()}'));
+                            if (match) {{
+                                match.dispatchEvent(new MouseEvent('click', {{bubbles: true, cancelable: true}}));
+                                return true;
+                            }}
+                            return false;
+                        }}
+                    """)
+                    if clicked:
+                        log.info(f"Clicked '{text}' via dispatchEvent in frame {i}")
+                        return True
+                except Exception:
+                    pass
+
             raise Exception(f"Button '{text}' not found anywhere on the page")
 
         def click_label(text):
@@ -310,7 +330,7 @@ def register(day: str):
         log.info("Step 1: Attendees page — clicking Next...")
         try:
             # Extra wait for JS-rendered content inside frames
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(5000)
             log_page_state("before Step 1")
             click_button("Next")
             page.wait_for_load_state("networkidle", timeout=15000)
