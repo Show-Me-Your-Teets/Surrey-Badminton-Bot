@@ -1,0 +1,33 @@
+# Fires Sunday 02:00 UTC = Sunday 7:00pm PDT = exactly 72h before Wednesday 7:00pm
+# Winter PST: change 02:00 → 03:00
+name: Register Wednesday Badminton
+on:
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+          playwright install-deps chromium
+      - name: Register
+        env:
+          SURREY_EMAIL: ${{ secrets.SURREY_EMAIL }}
+          SURREY_PASSWORD: ${{ secrets.SURREY_PASSWORD }}
+        run: python register.py --day wednesday
+      - name: Upload screenshot on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-wednesday
+          path: debug_screenshot.png
+          if-no-files-found: ignore
