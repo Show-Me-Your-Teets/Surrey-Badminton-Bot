@@ -132,6 +132,14 @@ def register(day):
         # ── Step 4: Click Next (Attendees) ────────────────────────────────────
         log.info("Step 1/3: Clicking Next...")
         page.wait_for_timeout(3000)
+        # Log all frames and buttons for debugging
+        for i, frame in enumerate(page.frames):
+            try:
+                btns = frame.evaluate("() => [...document.querySelectorAll('button')].map(b => b.textContent.trim()).filter(Boolean)")
+                log.info(f"Frame {i} ({frame.url[:80]}): buttons={btns}")
+            except Exception as e:
+                log.info(f"Frame {i} error: {e}")
+        page.screenshot(path="debug.png")
         js_click_button("Next")
         page.wait_for_timeout(3000)
         log.info(f"URL after Step 1: {page.url}")
