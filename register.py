@@ -215,17 +215,50 @@ def register(day: str):
             browser.close()
             sys.exit(1)
 
+        def click_button(text, timeout=15000):
+            """Click a button by text, searching both main page and all frames."""
+            # Try main page first
+            btn = page.locator(f'button:has-text("{text}")').first
+            try:
+                btn.wait_for(state="visible", timeout=3000)
+                btn.click()
+                return True
+            except Exception:
+                pass
+            # Try each iframe
+            for frame in page.frames:
+                try:
+                    fb = frame.locator(f'button:has-text("{text}")').first
+                    fb.wait_for(state="visible", timeout=3000)
+                    fb.click()
+                    return True
+                except Exception:
+                    pass
+            raise PlaywrightTimeout(f"Button '{text}' not found in page or any frame")
+
+        def click_label(text, timeout=8000):
+            """Click a label by text, searching both main page and all frames."""
+            for frame in [page] + page.frames:
+                try:
+                    el = frame.locator(f'label:has-text("{text}")').first
+                    if el.is_visible(timeout=2000):
+                        el.click()
+                        return True
+                except Exception:
+                    pass
+            return False
+
         # ── STEP 1: Attendees — click Next ────────────────────────────────────
         log.info("Step 1: Attendees page — clicking Next...")
         try:
-            next_btn = page.locator('button:has-text("Next")').first
-            next_btn.wait_for(state="visible", timeout=15000)
-            next_btn.click()
+            # Extra wait for JS-rendered content inside frames
+            page.wait_for_timeout(3000)
+            click_button("Next")
             page.wait_for_load_state("networkidle", timeout=15000)
             page.wait_for_timeout(2000)
             log.info(f"After Step 1 Next, URL: {page.url}")
-        except PlaywrightTimeout:
-            log.error("Could not find Next button on Attendees page.")
+        except Exception as e:
+            log.error(f"Could not find Next button on Attendees page: {e}")
             save_debug(page, "step1_failed")
             browser.close()
             sys.exit(1)
@@ -233,28 +266,21 @@ def register(day: str):
         # ── STEP 2: Fees & Extras — select Free pass, click Next ──────────────
         log.info("Step 2: Fees page — selecting Rec Surrey Pass (Free)...")
         try:
-            # Look for the free/Rec Surrey Pass radio button
-            free_pass = page.locator(
-                'label:has-text("Rec Surrey Pass"), '
-                'label:has-text("CRS - Drop In Sport - Rec Surrey Pass"), '
-                'input[type="radio"] + label:has-text("Free")'
-            ).first
-
-            if free_pass.is_visible(timeout=5000):
-                free_pass.click()
+            page.wait_for_timeout(2000)
+            # Select the free Rec Surrey Pass option
+            selected = click_label("Rec Surrey Pass")
+            if selected:
                 log.info("Selected Rec Surrey Pass (Free)")
-                page.wait_for_timeout(500)
             else:
-                log.info("Free pass option not visible — proceeding with default selection")
+                log.info("Free pass label not found — proceeding with default selection")
+            page.wait_for_timeout(500)
 
-            next_btn = page.locator('button:has-text("Next")').first
-            next_btn.wait_for(state="visible", timeout=10000)
-            next_btn.click()
+            click_button("Next")
             page.wait_for_load_state("networkidle", timeout=15000)
             page.wait_for_timeout(2000)
             log.info(f"After Step 2 Next, URL: {page.url}")
-        except PlaywrightTimeout:
-            log.error("Could not complete Fees page.")
+        except Exception as e:
+            log.error(f"Could not complete Fees page: {e}")
             save_debug(page, "step2_failed")
             browser.close()
             sys.exit(1)
@@ -262,14 +288,13 @@ def register(day: str):
         # ── STEP 3: Payment — click Place My Order ────────────────────────────
         log.info("Step 3: Payment page — clicking Place My Order...")
         try:
-            place_order = page.locator('button:has-text("Place My Order")').first
-            place_order.wait_for(state="visible", timeout=15000)
-            place_order.click()
+            page.wait_for_timeout(2000)
+            click_button("Place My Order")
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(2000)
             log.info(f"After Place My Order, URL: {page.url}")
-        except PlaywrightTimeout:
-            log.error("Could not find Place My Order button.")
+        except Exception as e:
+            log.error(f"Could not find Place My Order button: {e}")
             save_debug(page, "step3_failed")
             browser.close()
             sys.exit(1)
