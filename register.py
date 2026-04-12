@@ -109,18 +109,17 @@ def register(day):
             page.fill("#loginradius-login-emailid", email)
             page.fill("#loginradius-login-password", password)
             page.evaluate("document.getElementById('loginradius-submit-login').click()")
-            # Wait until we land on perfectmind
-            page.wait_for_function("() => window.location.href.includes('perfectmind.com')", timeout=30000)
-            page.wait_for_timeout(1000)
+            # Wait for the full SSO redirect chain to complete
+            # It goes: accounts.surrey.ca → SessionSignIn → /Menu/ → done
+            page.wait_for_load_state("networkidle", timeout=30000)
+            page.wait_for_timeout(2000)
             log.info(f"Logged in. URL: {page.url}")
 
-        # ── Step 3: Navigate to reg URL now that we're authenticated ──────────
+        # ── Step 3: Force navigate to /Clients/ reg URL (authenticated) ───────
         log.info("Loading registration page...")
-        page.goto(reg_url, wait_until="domcontentloaded")
-        # Wait for the Next button to appear in the DOM (not just visible)
-        page.wait_for_selector("button:has-text('Next')", state="attached", timeout=20000)
-        page.wait_for_timeout(1000)
-        log.info("Registration page loaded.")
+        page.goto(reg_url, wait_until="networkidle", timeout=30000)
+        page.wait_for_timeout(3000)
+        log.info(f"Registration page loaded. URL: {page.url}")
 
         # ── Step 4: Attendees — click Next ────────────────────────────────────
         log.info("Step 1/3: Clicking Next on Attendees page...")
