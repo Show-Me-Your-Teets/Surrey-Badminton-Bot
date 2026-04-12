@@ -1,5 +1,6 @@
 """
 Surrey Recreation - Badminton Auto-Registration Bot
+Strategy: Login first, then navigate to registration URL (already authenticated)
 """
 
 import os
@@ -15,6 +16,7 @@ log = logging.getLogger(__name__)
 
 WIDGET_ID = "b4059e75-9755-401f-a7b5-d7c75361420d"
 BASE_URL  = "https://cityofsurrey.perfectmind.com"
+LOGIN_URL = "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authorize?client_id=9082628b-1eed-4ccb-9ba9-bae04e1f4d13&response_type=code&scope=openid%20email%20profile&redirect_uri=https%3A//www.surrey.ca/openid-connect/generic&state=kqpp3LJd00-CdKqRZZCoCX9YafSq8Z3menVhsqEDYGM&prompt=login"
 
 SESSIONS = {
     "monday":    {"name": "Drop In Badminton 13+ - Newton (Mon 6:45pm)",                 "event_id": "65abb86d-b638-c9ff-b0f5-64f5db71c690", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 0},
@@ -34,6 +36,24 @@ def get_occurrence_date(session):
     if days_ahead == 0:
         days_ahead = 7
     return (now + timedelta(days=days_ahead)).date().strftime("%Y%m%d")
+
+
+def js_click(page, text, partial=False):
+    """Click a button by text across all frames using JS."""
+    for frame in page.frames:
+        try:
+            found = frame.evaluate(f"""() => {{
+                const btns = [...document.querySelectorAll('button')];
+                const btn = btns.find(b => {'b.textContent.includes' if partial else 'b.textContent.trim() ==='}('{text}'));
+                if (btn) {{ btn.click(); return true; }}
+                return false;
+            }}""")
+            if found:
+                log.info(f"Clicked '{text}' in frame: {frame.url[:70]}")
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def register(day):
@@ -62,113 +82,96 @@ def register(day):
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
 
-        # ── Step 1: Load reg URL → redirects to login ─────────────────────────
-        page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
+        # ── Phase 1: Login directly first ─────────────────────────────────────
+        log.info("Phase 1: Logging in...")
+        page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
-        log.info(f"Initial URL: {page.url}")
+        log.info(f"Login page URL: {page.url}")
 
-        # ── Step 2: Login ─────────────────────────────────────────────────────
+        # Fill credentials
+        page.wait_for_selector("#loginradius-login-emailid", state="attached", timeout=15000)
+        page.fill("#loginradius-login-emailid", email)
+        page.fill("#loginradius-login-password", password)
+
+        # Unhide and click submit
+        page.evaluate("""
+            () => {
+                const btn = document.getElementById('loginradius-submit-login');
+                btn.style.cssText = 'display:block !important; visibility:visible !important; opacity:1 !important;';
+                btn.click();
+            }
+        """)
+
+        # Wait until redirected away from accounts.surrey.ca
+        for _ in range(30):
+            page.wait_for_timeout(1000)
+            if "accounts.surrey.ca" not in page.url:
+                break
+
+        page.wait_for_timeout(2000)
+        log.info(f"After login URL: {page.url}")
+
         if "accounts.surrey.ca" in page.url:
-            log.info("Logging in...")
-            # Wait for LoginRadius form fields to appear
-            page.wait_for_selector("#loginradius-login-emailid", state="attached", timeout=20000)
-            page.fill("#loginradius-login-emailid", email)
-            page.fill("#loginradius-login-password", password)
-            # Submit button is hidden by CSS — unhide it and click via JS
-            page.evaluate("""
-                () => {
-                    const btn = document.getElementById('loginradius-submit-login');
-                    btn.style.display = 'block';
-                    btn.style.visibility = 'visible';
-                    btn.style.opacity = '1';
-                    btn.click();
-                }
-            """)
-            # Wait for redirect away from accounts.surrey.ca
-            for _ in range(30):
-                page.wait_for_timeout(1000)
-                if "accounts.surrey.ca" not in page.url:
-                    break
-            page.wait_for_timeout(2000)
-            log.info(f"After login URL: {page.url}")
+            log.error("Login failed — still on login page. Check credentials.")
+            sys.exit(1)
 
-        # ── Step 3: Navigate to reg page (authenticated) ──────────────────────
-        log.info("Loading registration page...")
+        log.info("✅ Login successful!")
+
+        # ── Phase 2: Navigate to registration page (already authenticated) ─────
+        log.info("Phase 2: Navigating to registration page...")
         page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(5000)
         log.info(f"Reg page URL: {page.url}")
 
-        def js_click_button(text, partial=False):
-            """Find and click a button across all frames using JS."""
-            for frame in page.frames:
-                try:
-                    found = frame.evaluate(f"""() => {{
-                        const btns = [...document.querySelectorAll('button')];
-                        const btn = btns.find(b => {'b.textContent.includes' if partial else 'b.textContent.trim() ==='}('{text}'));
-                        if (btn) {{ btn.click(); return true; }}
-                        return false;
-                    }}""")
-                    if found:
-                        log.info(f"Clicked '{text}' in frame: {frame.url[:70]}")
-                        return
-                except Exception:
-                    pass
-            raise Exception(f"Button '{text}' not found in any frame")
+        # Dismiss any popup (e.g. "already have item in cart" dialog)
+        if js_click(page, "Continue"):
+            log.info("Dismissed popup (clicked Continue)")
+            page.wait_for_timeout(2000)
+        elif js_click(page, "Add Anyway"):
+            log.info("Dismissed popup (clicked Add Anyway)")
+            page.wait_for_timeout(2000)
 
-        def js_click_label(text):
-            """Find and click a label across all frames using JS."""
-            for frame in page.frames:
-                try:
-                    found = frame.evaluate(f"""() => {{
-                        const labels = [...document.querySelectorAll('label')];
-                        const label = labels.find(l => l.textContent.includes('{text}'));
-                        if (label) {{ label.click(); return true; }}
-                        return false;
-                    }}""")
-                    if found:
-                        log.info(f"Clicked label '{text}' in frame: {frame.url[:70]}")
-                        return
-                except Exception:
-                    pass
-            log.warning(f"Label '{text}' not found, using default")
-
-        # ── Step 4: Click Next (Attendees) ────────────────────────────────────
-        log.info("Step 1/3: Clicking Next...")
-        page.wait_for_timeout(3000)
-        # Log all frames and buttons for debugging
-        for i, frame in enumerate(page.frames):
-            try:
-                btns = frame.evaluate("() => [...document.querySelectorAll('button')].map(b => b.textContent.trim()).filter(Boolean)")
-                log.info(f"Frame {i} ({frame.url[:80]}): buttons={btns}")
-            except Exception as e:
-                log.info(f"Frame {i} error: {e}")
+        # Take screenshot for debugging
         page.screenshot(path="debug.png")
-        js_click_button("Next")
+
+        # ── Step 1: Attendees — click Next ────────────────────────────────────
+        log.info("Step 1/3: Clicking Next (Attendees)...")
+        page.wait_for_timeout(1000)
+        if not js_click(page, "Next"):
+            log.error("Next button not found!")
+            for i, frame in enumerate(page.frames):
+                try:
+                    btns = frame.evaluate("() => [...document.querySelectorAll('button')].map(b => b.textContent.trim()).filter(Boolean)")
+                    log.info(f"Frame {i}: {btns}")
+                except Exception:
+                    pass
+            sys.exit(1)
+
         page.wait_for_timeout(3000)
         log.info(f"URL after Step 1: {page.url}")
 
-        # ── Step 5: Select free pass, click Next (Fees) ───────────────────────
-        log.info("Step 2/3: Selecting free pass, clicking Next...")
+        # ── Step 2: Fees — select free pass, click Next ───────────────────────
+        log.info("Step 2/3: Selecting free pass, clicking Next (Fees)...")
         page.wait_for_timeout(2000)
-        js_click_label("Rec Surrey Pass")
+        js_click(page, "Rec Surrey Pass", partial=True)
         page.wait_for_timeout(500)
-        js_click_button("Next")
+        js_click(page, "Next")
         page.wait_for_timeout(3000)
         log.info(f"URL after Step 2: {page.url}")
 
-        # ── Step 6: Place My Order (Payment) ──────────────────────────────────
+        # ── Step 3: Payment — Place My Order ─────────────────────────────────
         log.info("Step 3/3: Clicking Place My Order...")
         page.wait_for_timeout(2000)
-        js_click_button("Place My Order", partial=True)
+        js_click(page, "Place My Order", partial=True)
         page.wait_for_timeout(4000)
         log.info(f"URL after Step 3: {page.url}")
 
-        # ── Confirm ───────────────────────────────────────────────────────────
+        # ── Confirm success ───────────────────────────────────────────────────
         body = page.inner_text("body").lower()
         if "thank you" in body:
             log.info("✅ Registration successful!")
         elif "already registered" in body:
-            log.info("✅ Already registered.")
+            log.info("✅ Already registered for this session.")
         else:
             page.screenshot(path="debug.png")
             log.warning("⚠️ Could not confirm. Screenshot saved.")
