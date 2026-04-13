@@ -268,35 +268,31 @@ def register(day):
             page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(5000)
         # Wait longer for the order confirmation to fully load
         page.wait_for_timeout(8000)
         log.info(f"Final URL: {page.url}")
         page.screenshot(path="final.png")
 
-        # ── Confirm success ───────────────────────────────────────────────────
-        body = page.inner_text("body").lower()
-        log.info(f"Page text snippet: {body[:500]}")
+        # ── Confirm success — check all frames ───────────────────────────────
+        # The thank you page may be inside an iframe
+        full_text = ""
+        for frame in page.frames:
+            try:
+                full_text += frame.inner_text("body").lower() + " "
+            except Exception:
+                pass
+        log.info(f"Full page text: {full_text[:500]}")
+        page.screenshot(path="final.png")
 
-        if "thank you" in body:
+        if "thank you" in full_text:
             log.info("✅ Registration successful!")
-        elif "already registered" in body or "already booked" in body:
+        elif "already registered" in full_text or "already booked" in full_text:
             log.info("✅ Already registered for this session.")
-        elif "unexpected error" in body or "error message" in body:
-            # Check if we're already registered by looking at My Schedule
-            log.warning("Payment error — checking if already registered...")
-            page.goto(f"{BASE_URL}/23615/Menu/Contact", wait_until="domcontentloaded", timeout=15000)
-            page.wait_for_timeout(2000)
-            schedule_text = page.inner_text("body").lower()
-            if "drop in badminton" in schedule_text and occurrence_date[:4] + "-" + occurrence_date[4:6] + "-" + occurrence_date[6:] in schedule_text:
-                log.info("✅ Already registered — confirmed from My Info page.")
-            else:
-                page.screenshot(path="debug.png")
-                log.warning("⚠️ Payment error. May already be registered or session full.")
-                log.warning("Please check your Surrey account manually.")
+        elif "receipt" in full_text or "confirmation" in full_text or "booked" in full_text:
+            log.info("✅ Registration confirmed!")
         else:
-            page.screenshot(path="debug.png")
-            log.warning(f"⚠️ Unexpected page. Body: {body[:400]}")
+            log.warning(f"⚠️ Could not confirm. Check final.png. Text: {full_text[:300]}")
 
         browser.close()
 
