@@ -42,17 +42,22 @@ def js_click(page, text, partial=False):
     """Click a button by text across all frames using JS."""
     for frame in page.frames:
         try:
+            cmp = "b.textContent.includes" if partial else "b.textContent.trim() ==="
             found = frame.evaluate(f"""() => {{
-                const btns = [...document.querySelectorAll('button')];
-                const btn = btns.find(b => {'b.textContent.includes' if partial else 'b.textContent.trim() ==='}('{text}'));
-                if (btn) {{ btn.click(); return true; }}
+                const btns = [...document.querySelectorAll('button, input[type=submit], a[class*=btn]')];
+                const btn = btns.find(b => {cmp}('{text}'));
+                if (btn) {{
+                    btn.scrollIntoView();
+                    btn.dispatchEvent(new MouseEvent('click', {{bubbles: true, cancelable: true, view: window}}));
+                    return true;
+                }}
                 return false;
             }}""")
             if found:
                 log.info(f"Clicked '{text}' in frame: {frame.url[:70]}")
                 return True
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Frame error: {e}")
     return False
 
 
@@ -137,36 +142,95 @@ def register(day):
         page.screenshot(path="debug.png")
         log.info("Screenshot taken after popup dismissal")
 
+        # The form is inside an iframe. Find the correct frame first.
+        def get_form_frame():
+            """Return the frame that contains the registration form."""
+            for frame in page.frames:
+                try:
+                    has_next = frame.evaluate("""
+                        () => [...document.querySelectorAll('button')]
+                              .some(b => b.textContent.trim() === 'Next')
+                    """)
+                    if has_next:
+                        return frame
+                except Exception:
+                    pass
+            return None
+
+        def click_in_form(text, partial=False):
+            """Click a button in the registration form frame."""
+            frame = get_form_frame()
+            if frame:
+                cmp = f"b.textContent.includes('{text}')" if partial else f"b.textContent.trim() === '{text}'"
+                result = frame.evaluate(f"""() => {{
+                    const btn = [...document.querySelectorAll('button')].find(b => {cmp});
+                    if (btn) {{
+                        btn.scrollIntoView();
+                        btn.dispatchEvent(new MouseEvent('click', {{bubbles:true, cancelable:true, view:window}}));
+                        return btn.textContent.trim();
+                    }}
+                    return null;
+                }}""")
+                log.info(f"Clicked in form frame: {result} (frame: {frame.url[:60]})")
+                return result is not None
+            # fallback to js_click
+            log.warning(f"Form frame not found, falling back to js_click for '{text}'")
+            return js_click(page, text, partial)
+
         # ── Step 1: Attendees — click Next ────────────────────────────────────
         log.info("Step 1/3: Clicking Next (Attendees)...")
-        page.wait_for_timeout(2000)
-        js_click(page, "Next")
+        page.wait_for_timeout(3000)
+        click_in_form("Next")
         page.wait_for_timeout(4000)
         log.info("Step 1 done")
 
         # ── Step 2: Fees — select free pass ($0.00), click Next ───────────────
         log.info("Step 2/3: Selecting free pass, clicking Next (Fees)...")
         page.wait_for_timeout(2000)
-        # Select Rec Surrey Pass (it may already be selected, but click to be sure)
-        js_click(page, "Rec Surrey Pass", partial=True)
+        frame = get_form_frame()
+        if frame:
+            frame.evaluate("""() => {
+                const labels = [...document.querySelectorAll('label')];
+                const lbl = labels.find(l => l.textContent.includes('Rec Surrey Pass'));
+                if (lbl) lbl.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
+            }""")
         page.wait_for_timeout(1000)
-        js_click(page, "Next")
+        click_in_form("Next")
         page.wait_for_timeout(4000)
         log.info("Step 2 done")
 
         # ── Step 3: Payment — Place My Order ─────────────────────────────────
         log.info("Step 3/3: Clicking Place My Order...")
         page.wait_for_timeout(2000)
-        # Log all frames and buttons to diagnose
-        for i, frame in enumerate(page.frames):
+        page.screenshot(path="step3.png")
+        # Place My Order is on a different page/frame — search all frames
+        found = False
+        for frame in page.frames:
             try:
-                btns = frame.evaluate("() => [...document.querySelectorAll('button, input[type=submit], a')].map(e => (e.innerText || e.value || '').trim()).filter(Boolean)")
-                log.info(f"Step3 Frame {i} ({frame.url[:60]}): {btns}")
+                result = frame.evaluate("""() => {
+                    const btn = [...document.querySelectorAll('button, input[type=submit]')]
+                        .find(b => (b.textContent || b.value || '').includes('Place My Order'));
+                    if (btn) {
+                        btn.scrollIntoView();
+                        btn.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
+                        return true;
+                    }
+                    return false;
+                }""")
+                if result:
+                    log.info(f"Clicked Place My Order in frame: {frame.url[:70]}")
+                    found = True
+                    break
             except Exception:
                 pass
-        page.screenshot(path="step3.png")
-        result = js_click(page, "Place My Order", partial=True)
-        log.info(f"Place My Order click result: {result}")
+        if not found:
+            log.warning("Place My Order not found — logging all frames:")
+            for i, frame in enumerate(page.frames):
+                try:
+                    btns = frame.evaluate("() => [...document.querySelectorAll('button, input[type=submit]')].map(e => (e.innerText||e.value||'').trim()).filter(Boolean)")
+                    log.info(f"  Frame {i} ({frame.url[:60]}): {btns}")
+                except Exception:
+                    pass
         page.wait_for_timeout(5000)
         log.info(f"Final URL: {page.url}")
 
