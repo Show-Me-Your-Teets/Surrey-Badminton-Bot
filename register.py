@@ -123,42 +123,40 @@ def register(day):
         page.wait_for_timeout(5000)
         log.info(f"Reg page URL: {page.url}")
 
-        # Dismiss any "already have item in cart" popup first
+        # The site shows a "you already have items in cart" modal on load.
+        # Click "Continue" (keep existing cart) once to dismiss it, then proceed.
         page.wait_for_timeout(1000)
         if js_click(page, "Continue"):
-            log.info("Dismissed popup (clicked Continue)")
+            log.info("Dismissed cart popup (Continue)")
             page.wait_for_timeout(3000)
         elif js_click(page, "Add Anyway"):
-            log.info("Dismissed popup (clicked Add Anyway)")
+            log.info("Dismissed cart popup (Add Anyway)")
             page.wait_for_timeout(3000)
 
         # Take screenshot for debugging
         page.screenshot(path="debug.png")
+        log.info("Screenshot taken after popup dismissal")
 
         # ── Step 1: Attendees — click Next ────────────────────────────────────
         log.info("Step 1/3: Clicking Next (Attendees)...")
         page.wait_for_timeout(2000)
         js_click(page, "Next")
-        log.info("Clicked Next on Step 1, waiting for Step 2 to load...")
         page.wait_for_timeout(4000)
+        log.info("Step 1 done")
 
-        # ── Step 2: Fees — select free pass, click Next ───────────────────────
+        # ── Step 2: Fees — select free pass ($0.00), click Next ───────────────
         log.info("Step 2/3: Selecting free pass, clicking Next (Fees)...")
-        # Dismiss any new popup first
-        if js_click(page, "Continue"):
-            log.info("Dismissed popup on Step 2")
-            page.wait_for_timeout(2000)
+        page.wait_for_timeout(2000)
+        # Select Rec Surrey Pass (it may already be selected, but click to be sure)
         js_click(page, "Rec Surrey Pass", partial=True)
         page.wait_for_timeout(1000)
         js_click(page, "Next")
-        log.info("Clicked Next on Step 2, waiting for Step 3 to load...")
         page.wait_for_timeout(4000)
+        log.info("Step 2 done")
 
         # ── Step 3: Payment — Place My Order ─────────────────────────────────
         log.info("Step 3/3: Clicking Place My Order...")
-        if js_click(page, "Continue"):
-            log.info("Dismissed popup on Step 3")
-            page.wait_for_timeout(2000)
+        page.wait_for_timeout(2000)
         js_click(page, "Place My Order", partial=True)
         page.wait_for_timeout(5000)
         log.info(f"Final URL: {page.url}")
