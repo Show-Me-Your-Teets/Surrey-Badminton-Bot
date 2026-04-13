@@ -252,16 +252,43 @@ def register(day):
                     pass
         page.wait_for_timeout(5000)
         log.info(f"Final URL: {page.url}")
+        page.screenshot(path="final.png")
 
         # ── Confirm success ───────────────────────────────────────────────────
         body = page.inner_text("body").lower()
+        log.info(f"Page text snippet: {body[:300]}")
         if "thank you" in body:
             log.info("✅ Registration successful!")
         elif "already registered" in body:
             log.info("✅ Already registered for this session.")
+        elif "unexpected error" in body:
+            # Error on payment page — likely a stale cart from a previous run
+            # Clear cart and try again
+            log.warning("Payment error detected — clearing cart and retrying...")
+            js_click(page, "Clear Cart", partial=True)
+            page.wait_for_timeout(2000)
+            # Go back to registration
+            page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+            js_click(page, "Continue")
+            page.wait_for_timeout(2000)
+            js_click(page, "Next")
+            page.wait_for_timeout(4000)
+            js_click(page, "Rec Surrey Pass", partial=True)
+            page.wait_for_timeout(1000)
+            js_click(page, "Next")
+            page.wait_for_timeout(4000)
+            js_click(page, "Place My Order", partial=True)
+            page.wait_for_timeout(5000)
+            body2 = page.inner_text("body").lower()
+            if "thank you" in body2:
+                log.info("✅ Registration successful on retry!")
+            else:
+                page.screenshot(path="debug.png")
+                log.warning(f"⚠️ Still could not confirm after retry. Body: {body2[:200]}")
         else:
             page.screenshot(path="debug.png")
-            log.warning("⚠️ Could not confirm. Screenshot saved.")
+            log.warning(f"⚠️ Could not confirm. Body snippet: {body[:300]}")
 
         browser.close()
 
