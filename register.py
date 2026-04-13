@@ -233,9 +233,9 @@ def register(day):
 
         # ── Step 3: Payment — Place My Order ─────────────────────────────────
         log.info("Step 3/3: Clicking Place My Order...")
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(3000)
         page.screenshot(path="step3.png")
-        # Place My Order is on a different page/frame — search all frames
+        # Place My Order is on store-ca.perfectmind.com frame
         found = False
         for frame in page.frames:
             try:
@@ -244,7 +244,7 @@ def register(day):
                         .find(b => (b.textContent || b.value || '').includes('Place My Order'));
                     if (btn) {
                         btn.scrollIntoView();
-                        btn.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
+                        btn.click();
                         return true;
                     }
                     return false;
@@ -263,45 +263,36 @@ def register(day):
                     log.info(f"  Frame {i} ({frame.url[:60]}): {btns}")
                 except Exception:
                     pass
-        page.wait_for_timeout(5000)
+        # Wait for confirmation page to fully load
+        page.wait_for_load_state("networkidle", timeout=15000)
+        # Wait longer for the order confirmation to fully load
+        page.wait_for_timeout(8000)
         log.info(f"Final URL: {page.url}")
         page.screenshot(path="final.png")
 
         # ── Confirm success ───────────────────────────────────────────────────
         body = page.inner_text("body").lower()
-        log.info(f"Page text snippet: {body[:300]}")
+        log.info(f"Page text snippet: {body[:500]}")
+
         if "thank you" in body:
             log.info("✅ Registration successful!")
-        elif "already registered" in body:
+        elif "already registered" in body or "already booked" in body:
             log.info("✅ Already registered for this session.")
-        elif "unexpected error" in body:
-            # Error on payment page — likely a stale cart from a previous run
-            # Clear cart and try again
-            log.warning("Payment error detected — clearing cart and retrying...")
-            js_click(page, "Clear Cart", partial=True)
+        elif "unexpected error" in body or "error message" in body:
+            # Check if we're already registered by looking at My Schedule
+            log.warning("Payment error — checking if already registered...")
+            page.goto(f"{BASE_URL}/23615/Menu/Contact", wait_until="domcontentloaded", timeout=15000)
             page.wait_for_timeout(2000)
-            # Go back to registration
-            page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(3000)
-            js_click(page, "Continue")
-            page.wait_for_timeout(2000)
-            js_click(page, "Next")
-            page.wait_for_timeout(4000)
-            js_click(page, "Rec Surrey Pass", partial=True)
-            page.wait_for_timeout(1000)
-            js_click(page, "Next")
-            page.wait_for_timeout(4000)
-            js_click(page, "Place My Order", partial=True)
-            page.wait_for_timeout(5000)
-            body2 = page.inner_text("body").lower()
-            if "thank you" in body2:
-                log.info("✅ Registration successful on retry!")
+            schedule_text = page.inner_text("body").lower()
+            if "drop in badminton" in schedule_text and occurrence_date[:4] + "-" + occurrence_date[4:6] + "-" + occurrence_date[6:] in schedule_text:
+                log.info("✅ Already registered — confirmed from My Info page.")
             else:
                 page.screenshot(path="debug.png")
-                log.warning(f"⚠️ Still could not confirm after retry. Body: {body2[:200]}")
+                log.warning("⚠️ Payment error. May already be registered or session full.")
+                log.warning("Please check your Surrey account manually.")
         else:
             page.screenshot(path="debug.png")
-            log.warning(f"⚠️ Could not confirm. Body snippet: {body[:300]}")
+            log.warning(f"⚠️ Unexpected page. Body: {body[:400]}")
 
         browser.close()
 
