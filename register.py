@@ -138,9 +138,22 @@ def register(day):
             log.info("Dismissed cart popup (Add Anyway)")
             page.wait_for_timeout(3000)
 
-        # Take screenshot for debugging
+        # Take screenshot and dump page HTML for debugging
         page.screenshot(path="debug.png")
-        log.info("Screenshot taken after popup dismissal")
+        # Dump full page HTML so we can see structure
+        html = page.content()
+        with open("page_source.html", "w") as f:
+            f.write(html)
+        log.info(f"Page source saved ({len(html)} chars). Frames: {len(page.frames)}")
+        for i, frame in enumerate(page.frames):
+            log.info(f"  Frame {i}: {frame.url}")
+            try:
+                fhtml = frame.content()
+                with open(f"frame_{i}.html", "w") as f:
+                    f.write(fhtml)
+                log.info(f"  Frame {i} source saved ({len(fhtml)} chars)")
+            except Exception as e:
+                log.info(f"  Frame {i} error: {e}")
 
         # The form is inside an iframe. Find the correct frame first.
         def get_form_frame():
