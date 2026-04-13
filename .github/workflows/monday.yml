@@ -30,7 +30,7 @@ jobs:
           path: |
             debug.png
             step3.png
+            final.png
             page_source.html
             frame_0.html
-            frame_1.html
           if-no-files-found: ignore
