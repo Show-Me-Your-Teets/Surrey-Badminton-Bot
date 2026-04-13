@@ -259,28 +259,27 @@ def register(day):
         except Exception as e:
             log.warning(f"Could not dump checkout frame: {e}")
 
-        # VISA is pre-selected — just click Place My Order directly
-        # Try regular click first, then Playwright locator as backup
+        # The button uses Knockout.js binding: click: processNow.bind($data)
+        # We need to invoke the KO click handler, not just call btn.click()
         clicked = checkout_frame.evaluate("""() => {
-            const btns = [...document.querySelectorAll('button')];
-            const btn = btns.find(b => b.textContent.trim().includes('Place My Order'));
-            if (btn) {
-                btn.scrollIntoView();
-                btn.focus();
-                btn.click();
-                return btn.textContent.trim();
-            }
-            return null;
-        }""")
-        log.info(f"Place My Order JS click result: {clicked}")
+            const btn = [...document.querySelectorAll('button.process-now')]
+                .find(b => b.textContent.trim().includes('Place My Order'));
+            if (!btn) return 'button not found';
 
-        # Also try Playwright click as backup
-        if not clicked:
-            try:
-                checkout_frame.locator("button:has-text('Place My Order')").click(timeout=5000)
-                log.info("Clicked Place My Order via Playwright locator")
-            except Exception as e:
-                log.warning(f"Playwright click also failed: {e}")
+            // Get the Knockout binding context and call processNow directly
+            const ko = window.ko;
+            if (ko) {
+                const ctx = ko.contextFor(btn);
+                if (ctx && ctx.$data && ctx.$data.processNow) {
+                    ctx.$data.processNow();
+                    return 'called processNow via KO';
+                }
+            }
+            // Fallback: trigger a real mouse click event
+            btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
+            return 'dispatched click event';
+        }""")
+        log.info(f"Place My Order result: {clicked}")
 
         # Wait for confirmation page to fully load
         try:
