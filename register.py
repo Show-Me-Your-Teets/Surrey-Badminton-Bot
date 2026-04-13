@@ -39,22 +39,28 @@ def get_occurrence_date(session):
 
 
 def js_click(page, text, partial=False):
-    """Click a button by text across all frames using JS."""
+    """Click any clickable element by text across all frames."""
+    # The Next button on this site is an <a class="bm-button"> not a <button>
+    # So we search all clickable elements: buttons, inputs, anchors, spans
     for frame in page.frames:
         try:
-            cmp = "b.textContent.includes" if partial else "b.textContent.trim() ==="
+            cmp = "t.includes" if partial else "t ==="
             found = frame.evaluate(f"""() => {{
-                const btns = [...document.querySelectorAll('button, input[type=submit], a[class*=btn]')];
-                const btn = btns.find(b => {cmp}('{text}'));
-                if (btn) {{
-                    btn.scrollIntoView();
-                    btn.dispatchEvent(new MouseEvent('click', {{bubbles: true, cancelable: true, view: window}}));
-                    return true;
+                const els = [...document.querySelectorAll('button, input[type=submit], a, span[role=button], div[role=button]')];
+                const el = els.find(e => {{
+                    const t = (e.innerText || e.textContent || e.value || e.title || '').trim();
+                    return {cmp}('{text}');
+                }});
+                if (el) {{
+                    el.scrollIntoView();
+                    el.click();
+                    el.dispatchEvent(new MouseEvent('click', {{bubbles: true, cancelable: true, view: window}}));
+                    return el.tagName + ':' + (el.className || '');
                 }}
-                return false;
+                return null;
             }}""")
             if found:
-                log.info(f"Clicked '{text}' in frame: {frame.url[:70]}")
+                log.info(f"Clicked '{text}' ({found}) in frame: {frame.url[:70]}")
                 return True
         except Exception as e:
             log.debug(f"Frame error: {e}")
