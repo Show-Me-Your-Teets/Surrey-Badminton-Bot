@@ -259,27 +259,56 @@ def register(day):
         except Exception as e:
             log.warning(f"Could not dump checkout frame: {e}")
 
-        # The button uses Knockout.js binding: click: processNow.bind($data)
-        # We need to invoke the KO click handler, not just call btn.click()
+        # The checkout uses KO + a REST API (POST /ProcessTransaction)
+        # For $0 orders, we call processNow via KO after ensuring payment is set
         clicked = checkout_frame.evaluate("""() => {
-            const btn = [...document.querySelectorAll('button.process-now')]
-                .find(b => b.textContent.trim().includes('Place My Order'));
-            if (!btn) return 'button not found';
-
-            // Get the Knockout binding context and call processNow directly
             const ko = window.ko;
-            if (ko) {
-                const ctx = ko.contextFor(btn);
-                if (ctx && ctx.$data && ctx.$data.processNow) {
-                    ctx.$data.processNow();
-                    return 'called processNow via KO';
+            if (!ko) return 'ko not found';
+
+            // Find the checkout viewmodel
+            const btn = document.getElementById('process-now-' + 
+                [...document.querySelectorAll('button.process-now')].map((b,i) => b.id.split('-').pop())[0]);
+            const anyBtn = [...document.querySelectorAll('button.process-now')][0];
+            if (!anyBtn) return 'button not found';
+
+            const ctx = ko.contextFor(anyBtn);
+            if (!ctx || !ctx.$data) return 'ko context not found';
+
+            const vm = ctx.$data;
+
+            // For $0 orders: set payment to null/free and call processNow
+            if (vm.orderBalance && vm.orderBalance() === 0) {
+                // No payment needed for free orders
+                if (vm.processNow) {
+                    vm.processNow();
+                    return 'called processNow (free order)';
                 }
             }
-            // Fallback: trigger a real mouse click event
-            btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
-            return 'dispatched click event';
+
+            // Try calling processNow directly
+            if (vm.processNow) {
+                vm.processNow();
+                return 'called processNow';
+            }
+
+            return 'processNow not found on vm';
         }""")
         log.info(f"Place My Order result: {clicked}")
+
+        # Also log what KO sees about the payment state
+        state = checkout_frame.evaluate("""() => {
+            const ko = window.ko;
+            const btn = [...document.querySelectorAll('button.process-now')][0];
+            if (!btn || !ko) return 'n/a';
+            const vm = ko.contextFor(btn)?.$data;
+            if (!vm) return 'no vm';
+            return JSON.stringify({
+                orderBalance: vm.orderBalance ? vm.orderBalance() : 'n/a',
+                showProcessNow: vm.showProcessNow ? vm.showProcessNow() : 'n/a',
+                payment: vm.payment ? String(vm.payment()) : 'n/a',
+            });
+        }""")
+        log.info(f"KO state: {state}")
 
         # Wait for confirmation page to fully load
         try:
