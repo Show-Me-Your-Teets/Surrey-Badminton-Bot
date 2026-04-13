@@ -128,14 +128,27 @@ def register(day):
 
         log.info("✅ Login successful!")
 
-        # ── Phase 2: Navigate to registration page (already authenticated) ─────
-        log.info("Phase 2: Navigating to registration page...")
+        # ── Phase 2: Clear any stale cart first ──────────────────────────────
+        log.info("Phase 2: Clearing any stale cart...")
+        cart_url = f"{BASE_URL}/23615/Menu/SocialSite/MemberCheckout"
+        page.goto(cart_url, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(2000)
+        if js_click(page, "Clear Cart", partial=True):
+            log.info("Cleared existing cart")
+            page.wait_for_timeout(2000)
+            # Confirm clear if dialog appears
+            js_click(page, "Yes", partial=False)
+            page.wait_for_timeout(2000)
+        else:
+            log.info("No cart to clear")
+
+        # ── Phase 3: Navigate to registration page ────────────────────────────
+        log.info("Phase 3: Navigating to registration page...")
         page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(5000)
         log.info(f"Reg page URL: {page.url}")
 
-        # The site shows a "you already have items in cart" modal on load.
-        # Click "Continue" (keep existing cart) once to dismiss it, then proceed.
+        # Dismiss any remaining cart popup
         page.wait_for_timeout(1000)
         if js_click(page, "Continue"):
             log.info("Dismissed cart popup (Continue)")
