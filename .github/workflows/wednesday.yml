@@ -1,5 +1,3 @@
-# Fires Sunday 02:00 UTC = Sunday 7:00pm PDT = exactly 72h before Wednesday 7:00pm
-# Winter PST: change 02:00 → 03:00
 name: Register Wednesday Badminton
 on:
   schedule:
@@ -24,10 +22,13 @@ jobs:
           SURREY_EMAIL: ${{ secrets.SURREY_EMAIL }}
           SURREY_PASSWORD: ${{ secrets.SURREY_PASSWORD }}
         run: python register.py --day wednesday
-      - name: Upload screenshot on failure
-        if: failure()
+      - name: Upload debug files
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: debug-wednesday
-          path: debug_screenshot.png
+          path: |
+            debug.png
+            step3.png
+            final.png
           if-no-files-found: ignore
