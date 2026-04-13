@@ -157,7 +157,16 @@ def register(day):
         # ── Step 3: Payment — Place My Order ─────────────────────────────────
         log.info("Step 3/3: Clicking Place My Order...")
         page.wait_for_timeout(2000)
-        js_click(page, "Place My Order", partial=True)
+        # Log all frames and buttons to diagnose
+        for i, frame in enumerate(page.frames):
+            try:
+                btns = frame.evaluate("() => [...document.querySelectorAll('button, input[type=submit], a')].map(e => (e.innerText || e.value || '').trim()).filter(Boolean)")
+                log.info(f"Step3 Frame {i} ({frame.url[:60]}): {btns}")
+            except Exception:
+                pass
+        page.screenshot(path="step3.png")
+        result = js_click(page, "Place My Order", partial=True)
+        log.info(f"Place My Order click result: {result}")
         page.wait_for_timeout(5000)
         log.info(f"Final URL: {page.url}")
 
