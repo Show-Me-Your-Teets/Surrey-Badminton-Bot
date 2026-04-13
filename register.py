@@ -20,7 +20,7 @@ LOGIN_URL = "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authoriz
 
 SESSIONS = {
     "monday":    {"name": "Drop In Badminton 13+ - Newton (Mon 6:45pm)",                 "event_id": "65abb86d-b638-c9ff-b0f5-64f5db71c690", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 0},
-    "tuesday":   {"name": "Drop In Badminton Adult - Chuck Bailey (Tue 6:30pm)",         "event_id": "0e9a4ac6-2925-85c9-7c73-a0138702c96d", "location_id": "3cdb8e82-fa18-4255-8aba-0ecb93d69da4", "weekday": 1},
+    "tuesday":   {"name": "Drop In Badminton Adult - Chuck Bailey (Tue 6:30pm)",         "event_id": "dca831cd-c03a-a572-97e3-4f375bf01464", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 1},
     "wednesday": {"name": "Drop In Badminton 13+ - Newton (Wed 7:00pm)",                 "event_id": "d01f26e7-3dc0-7f33-d611-c305bc786f9c",        "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6",  "weekday": 2},
     "thursday":  {"name": "Drop In Badminton Adult - Guildford (Thu 7:00pm)",            "event_id": "REPLACE_WITH_THURSDAY_EVENT_ID",         "location_id": "REPLACE_WITH_THURSDAY_LOCATION_ID",   "weekday": 3},
     "friday":    {"name": "Drop In Badminton Children with Adult - Guildford (Fri 5pm)", "event_id": "REPLACE_WITH_FRIDAY_EVENT_ID",           "location_id": "REPLACE_WITH_FRIDAY_LOCATION_ID",     "weekday": 4},
@@ -236,32 +236,51 @@ def register(day):
         page.wait_for_timeout(3000)
         page.screenshot(path="step3.png")
 
+        # Find the checkout frame (store-ca.perfectmind.com)
+        checkout_frame = None
         for frame in page.frames:
+            if "store-ca.perfectmind.com" in frame.url or "checkout" in frame.url:
+                checkout_frame = frame
+                break
+        if not checkout_frame:
+            log.warning("Checkout frame not found, trying all frames...")
+            for frame in page.frames:
+                log.info(f"  Available frame: {frame.url[:80]}")
+            checkout_frame = page.main_frame
+
+        log.info(f"Using checkout frame: {checkout_frame.url[:70]}")
+
+        # Dump checkout frame HTML for debugging
+        try:
+            fhtml = checkout_frame.content()
+            with open("checkout_frame.html", "w") as f:
+                f.write(fhtml)
+            log.info(f"Checkout frame HTML saved ({len(fhtml)} chars)")
+        except Exception as e:
+            log.warning(f"Could not dump checkout frame: {e}")
+
+        # VISA is pre-selected — just click Place My Order directly
+        # Try regular click first, then Playwright locator as backup
+        clicked = checkout_frame.evaluate("""() => {
+            const btns = [...document.querySelectorAll('button')];
+            const btn = btns.find(b => b.textContent.trim().includes('Place My Order'));
+            if (btn) {
+                btn.scrollIntoView();
+                btn.focus();
+                btn.click();
+                return btn.textContent.trim();
+            }
+            return null;
+        }""")
+        log.info(f"Place My Order JS click result: {clicked}")
+
+        # Also try Playwright click as backup
+        if not clicked:
             try:
-                # Select the first credit card radio button, then click Place My Order
-                result = frame.evaluate("""() => {
-                    // Select first available credit card
-                    const radios = [...document.querySelectorAll('input[type=radio]')];
-                    if (radios.length > 0) {
-                        radios[0].checked = true;
-                        radios[0].dispatchEvent(new Event('change', {bubbles: true}));
-                        radios[0].dispatchEvent(new MouseEvent('click', {bubbles: true}));
-                    }
-                    // Click Place My Order
-                    const btn = [...document.querySelectorAll('button, input[type=submit]')]
-                        .find(b => (b.textContent || b.value || '').includes('Place My Order'));
-                    if (btn) {
-                        btn.scrollIntoView();
-                        btn.click();
-                        return true;
-                    }
-                    return false;
-                }""")
-                if result:
-                    log.info(f"Selected card and clicked Place My Order in frame: {frame.url[:70]}")
-                    break
-            except Exception:
-                pass
+                checkout_frame.locator("button:has-text('Place My Order')").click(timeout=5000)
+                log.info("Clicked Place My Order via Playwright locator")
+            except Exception as e:
+                log.warning(f"Playwright click also failed: {e}")
 
         # Wait for confirmation page to fully load
         try:
