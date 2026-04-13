@@ -21,7 +21,7 @@ LOGIN_URL = "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authoriz
 SESSIONS = {
     "monday":    {"name": "Drop In Badminton 13+ - Newton (Mon 6:45pm)",                 "event_id": "65abb86d-b638-c9ff-b0f5-64f5db71c690", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 0},
     "tuesday":   {"name": "Drop In Badminton Adult - Chuck Bailey (Tue 6:30pm)",         "event_id": "0e9a4ac6-2925-85c9-7c73-a0138702c96d", "location_id": "3cdb8e82-fa18-4255-8aba-0ecb93d69da4", "weekday": 1},
-    "wednesday": {"name": "Drop In Badminton 13+ - Newton (Wed 7:00pm)",                 "event_id": "REPLACE_WITH_WEDNESDAY_EVENT_ID",        "location_id": "REPLACE_WITH_WEDNESDAY_LOCATION_ID",  "weekday": 2},
+    "wednesday": {"name": "Drop In Badminton 13+ - Newton (Wed 7:00pm)",                 "event_id": "d01f26e7-3dc0-7f33-d611-c305bc786f9c",        "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6",  "weekday": 2},
     "thursday":  {"name": "Drop In Badminton Adult - Guildford (Thu 7:00pm)",            "event_id": "REPLACE_WITH_THURSDAY_EVENT_ID",         "location_id": "REPLACE_WITH_THURSDAY_LOCATION_ID",   "weekday": 3},
     "friday":    {"name": "Drop In Badminton Children with Adult - Guildford (Fri 5pm)", "event_id": "REPLACE_WITH_FRIDAY_EVENT_ID",           "location_id": "REPLACE_WITH_FRIDAY_LOCATION_ID",     "weekday": 4},
     "saturday":  {"name": "Drop In Badminton Adult - Guildford (Sat 6:00pm)",            "event_id": "REPLACE_WITH_SATURDAY_EVENT_ID",         "location_id": "REPLACE_WITH_SATURDAY_LOCATION_ID",   "weekday": 5},
@@ -231,15 +231,23 @@ def register(day):
         page.wait_for_timeout(4000)
         log.info("Step 2 done")
 
-        # ── Step 3: Payment — Place My Order ─────────────────────────────────
-        log.info("Step 3/3: Clicking Place My Order...")
+        # ── Step 3: Payment — Select credit card then Place My Order ────────
+        log.info("Step 3/3: Selecting credit card and clicking Place My Order...")
         page.wait_for_timeout(3000)
         page.screenshot(path="step3.png")
-        # Place My Order is on store-ca.perfectmind.com frame
-        found = False
+
         for frame in page.frames:
             try:
+                # Select the first credit card radio button, then click Place My Order
                 result = frame.evaluate("""() => {
+                    // Select first available credit card
+                    const radios = [...document.querySelectorAll('input[type=radio]')];
+                    if (radios.length > 0) {
+                        radios[0].checked = true;
+                        radios[0].dispatchEvent(new Event('change', {bubbles: true}));
+                        radios[0].dispatchEvent(new MouseEvent('click', {bubbles: true}));
+                    }
+                    // Click Place My Order
                     const btn = [...document.querySelectorAll('button, input[type=submit]')]
                         .find(b => (b.textContent || b.value || '').includes('Place My Order'));
                     if (btn) {
@@ -250,21 +258,17 @@ def register(day):
                     return false;
                 }""")
                 if result:
-                    log.info(f"Clicked Place My Order in frame: {frame.url[:70]}")
-                    found = True
+                    log.info(f"Selected card and clicked Place My Order in frame: {frame.url[:70]}")
                     break
             except Exception:
                 pass
-        if not found:
-            log.warning("Place My Order not found — logging all frames:")
-            for i, frame in enumerate(page.frames):
-                try:
-                    btns = frame.evaluate("() => [...document.querySelectorAll('button, input[type=submit]')].map(e => (e.innerText||e.value||'').trim()).filter(Boolean)")
-                    log.info(f"  Frame {i} ({frame.url[:60]}): {btns}")
-                except Exception:
-                    pass
+
         # Wait for confirmation page to fully load
-        page.wait_for_load_state("networkidle", timeout=15000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        page.wait_for_timeout(3000)
         # Wait longer for the order confirmation to fully load
         page.wait_for_timeout(8000)
         log.info(f"Final URL: {page.url}")
