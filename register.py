@@ -259,56 +259,50 @@ def register(day):
         except Exception as e:
             log.warning(f"Could not dump checkout frame: {e}")
 
-        # The checkout uses KO + a REST API (POST /ProcessTransaction)
-        # For $0 orders, we call processNow via KO after ensuring payment is set
-        clicked = checkout_frame.evaluate("""() => {
-            const ko = window.ko;
-            if (!ko) return 'ko not found';
-
-            // Find the checkout viewmodel
-            const btn = document.getElementById('process-now-' + 
-                [...document.querySelectorAll('button.process-now')].map((b,i) => b.id.split('-').pop())[0]);
-            const anyBtn = [...document.querySelectorAll('button.process-now')][0];
-            if (!anyBtn) return 'button not found';
-
-            const ctx = ko.contextFor(anyBtn);
-            if (!ctx || !ctx.$data) return 'ko context not found';
-
-            const vm = ctx.$data;
-
-            // For $0 orders: set payment to null/free and call processNow
-            if (vm.orderBalance && vm.orderBalance() === 0) {
-                // No payment needed for free orders
-                if (vm.processNow) {
-                    vm.processNow();
-                    return 'called processNow (free order)';
-                }
-            }
-
-            // Try calling processNow directly
-            if (vm.processNow) {
-                vm.processNow();
-                return 'called processNow';
-            }
-
-            return 'processNow not found on vm';
-        }""")
-        log.info(f"Place My Order result: {clicked}")
-
-        # Also log what KO sees about the payment state
-        state = checkout_frame.evaluate("""() => {
+        # Call the ProcessTransaction API directly using the cart data from the KO model
+        result = checkout_frame.evaluate("""() => {
             const ko = window.ko;
             const btn = [...document.querySelectorAll('button.process-now')][0];
-            if (!btn || !ko) return 'n/a';
+            if (!btn || !ko) return 'ko/btn not found';
             const vm = ko.contextFor(btn)?.$data;
             if (!vm) return 'no vm';
-            return JSON.stringify({
-                orderBalance: vm.orderBalance ? vm.orderBalance() : 'n/a',
-                showProcessNow: vm.showProcessNow ? vm.showProcessNow() : 'n/a',
-                payment: vm.payment ? String(vm.payment()) : 'n/a',
-            });
+
+            // Get cart data from the server model embedded in the page
+            const serverModel = window.model || window.server;
+
+            // Extract key IDs from the KO viewmodel
+            const cartItems = vm.shoppingCart && vm.shoppingCart.cartItems
+                ? ko.unwrap(vm.shoppingCart.cartItems) : [];
+            const user = vm.user;
+            const contactId = user && user.userContactId ? ko.unwrap(user.userContactId) : null;
+
+            // For free orders, use the existing credit card financeInfoId
+            const cards = user && user.clientCreditCards ? ko.unwrap(user.clientCreditCards) : [];
+            const financeInfoId = cards.length > 0 ? ko.unwrap(cards[0].financeInfoId) : null;
+
+            const payload = {
+                financeInfoId: financeInfoId,
+                contactId: contactId,
+                cvv: null,
+                saveCard: false,
+                useAvailableCredit: false,
+                useLocationCredit: false,
+                giftCardPayments: [],
+                promoCodePayments: []
+            };
+
+            // Get base URL for the API
+            const baseUrl = window.location.origin + '/org/23615/apps/checkout/';
+
+            // Make the direct API call
+            return fetch(baseUrl + 'ProcessTransaction', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+                credentials: 'include'
+            }).then(r => r.text()).then(t => t.substring(0, 500));
         }""")
-        log.info(f"KO state: {state}")
+        log.info(f"ProcessTransaction API result: {result}")
 
         # Wait for confirmation page to fully load
         try:
