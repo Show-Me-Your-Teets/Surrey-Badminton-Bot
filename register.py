@@ -259,50 +259,30 @@ def register(day):
         except Exception as e:
             log.warning(f"Could not dump checkout frame: {e}")
 
-        # Call the ProcessTransaction API directly using the cart data from the KO model
-        result = checkout_frame.evaluate("""() => {
-            const ko = window.ko;
-            const btn = [...document.querySelectorAll('button.process-now')][0];
-            if (!btn || !ko) return 'ko/btn not found';
-            const vm = ko.contextFor(btn)?.$data;
-            if (!vm) return 'no vm';
-
-            // Get cart data from the server model embedded in the page
-            const serverModel = window.model || window.server;
-
-            // Extract key IDs from the KO viewmodel
-            const cartItems = vm.shoppingCart && vm.shoppingCart.cartItems
-                ? ko.unwrap(vm.shoppingCart.cartItems) : [];
-            const user = vm.user;
-            const contactId = user && user.userContactId ? ko.unwrap(user.userContactId) : null;
-
-            // For free orders, use the existing credit card financeInfoId
-            const cards = user && user.clientCreditCards ? ko.unwrap(user.clientCreditCards) : [];
-            const financeInfoId = cards.length > 0 ? ko.unwrap(cards[0].financeInfoId) : null;
-
-            const payload = {
-                financeInfoId: financeInfoId,
-                contactId: contactId,
-                cvv: null,
-                saveCard: false,
-                useAvailableCredit: false,
-                useLocationCredit: false,
-                giftCardPayments: [],
-                promoCodePayments: []
+        # Intercept the actual network request by patching fetch before clicking
+        checkout_frame.evaluate("""() => {
+            window._interceptedRequests = [];
+            const origFetch = window.fetch;
+            window.fetch = function(url, opts) {
+                window._interceptedRequests.push({
+                    url: url,
+                    method: opts && opts.method,
+                    body: opts && opts.body
+                });
+                return origFetch.apply(this, arguments);
             };
-
-            // Get base URL for the API
-            const baseUrl = window.location.origin + '/org/23615/apps/checkout/';
-
-            // Make the direct API call
-            return fetch(baseUrl + 'ProcessTransaction', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload),
-                credentials: 'include'
-            }).then(r => r.text()).then(t => t.substring(0, 500));
         }""")
-        log.info(f"ProcessTransaction API result: {result}")
+
+        # Now click the button the normal way
+        checkout_frame.evaluate("""() => {
+            const btn = [...document.querySelectorAll('button.process-now')][0];
+            if (btn) btn.click();
+        }""")
+        page.wait_for_timeout(3000)
+
+        # Capture what was sent
+        intercepted = checkout_frame.evaluate("() => JSON.stringify(window._interceptedRequests)")
+        log.info(f"Intercepted requests: {intercepted[:1000]}")
 
         # Wait for confirmation page to fully load
         try:
