@@ -84,17 +84,32 @@ def register(day):
         browser = p.chromium.launch(headless=False, args=['--no-sandbox', '--disable-dev-shm-usage'])
         context = browser.new_context(viewport={"width": 1280, "height": 900})
 
-        # Capture all network requests to find the ProcessTransaction call
+        # Capture ALL network requests at context level
         captured_requests = []
+        captured_responses = []
+
         def on_request(request):
-            if "ProcessTransaction" in request.url or "process" in request.url.lower():
+            if "ProcessTransaction" in request.url:
                 captured_requests.append({
                     "url": request.url,
                     "method": request.method,
-                    "post_data": request.post_data
+                    "post_data": request.post_data,
+                    "headers": dict(request.headers)
                 })
 
+        def on_response(response):
+            if "ProcessTransaction" in response.url:
+                try:
+                    captured_responses.append({
+                        "url": response.url,
+                        "status": response.status,
+                        "body": response.text()
+                    })
+                except Exception:
+                    pass
+
         context.on("request", on_request)
+        context.on("response", on_response)
         page = context.new_page()
 
         # ── Login ─────────────────────────────────────────────────────────────
@@ -182,19 +197,30 @@ def register(day):
             }""")
             log.info(f"financeInfoId from page: {finance_info_id}")
 
-            # Set up fetch interceptor BEFORE clicking
-            checkout_frame.evaluate("""() => {
-                window._capturedBody = null;
-                window._capturedUrl = null;
-                const orig = window.fetch;
-                window.fetch = function(url, opts) {
-                    if (url && url.toString().includes('ProcessTransaction')) {
-                        window._capturedUrl = url.toString();
-                        window._capturedBody = opts && opts.body ? opts.body : null;
-                    }
-                    return orig.apply(this, arguments);
-                };
-            }""")
+            # Use Playwright route interception to modify the ProcessTransaction request
+            import json as _json
+
+            def handle_route(route):
+                request = route.request
+                if "ProcessTransaction" in request.url:
+                    try:
+                        body = _json.loads(request.post_data)
+                        log.info(f"Intercepted ProcessTransaction: {_json.dumps(body)[:300]}")
+                        # Add the credit card
+                        if finance_info_id:
+                            body['payNow']['creditCardFinanceInfoPayments'] = [
+                                {"financeInfoId": finance_info_id, "cvv": None}
+                            ]
+                        log.info(f"Modified body: {_json.dumps(body)[:300]}")
+                        route.continue_(post_data=_json.dumps(body))
+                    except Exception as e:
+                        log.warning(f"Route modification failed: {e}")
+                        route.continue_()
+                else:
+                    route.continue_()
+
+            # Set up route interception for the checkout domain
+            context.route("**/ProcessTransaction**", handle_route)
 
             # Click the button
             btn = checkout_frame.locator("button.process-now").first
@@ -202,42 +228,6 @@ def register(day):
             page.wait_for_timeout(500)
             btn.click(force=True, timeout=10000)
             log.info("Clicked Place My Order")
-            page.wait_for_timeout(4000)
-
-            # Get the captured body and resend with credit card
-            captured = checkout_frame.evaluate("""() => ({
-                url: window._capturedUrl,
-                body: window._capturedBody
-            })""")
-            log.info(f"Captured: url={captured.get('url')}, body={str(captured.get('body'))[:300] if captured.get('body') else 'none'}")
-
-            if captured.get('body') and finance_info_id:
-                import json as _json
-                try:
-                    body = _json.loads(captured['body'])
-                    body['payNow']['creditCardFinanceInfoPayments'] = [{"financeInfoId": finance_info_id, "cvv": None}]
-                    fixed = _json.dumps(body)
-                    url = captured['url']
-                    result = checkout_frame.evaluate(f"""async () => {{
-                        const r = await fetch("{url}", {{
-                            method: "POST",
-                            headers: {{"Content-Type": "application/json"}},
-                            credentials: "include",
-                            body: JSON.stringify({fixed})
-                        }});
-                        const t = await r.text();
-                        // Trigger redirect if success
-                        if (t.includes('redirectUrl') || r.ok) {{
-                            try {{
-                                const j = JSON.parse(t);
-                                if (j.redirectUrl) window.parent.location.href = j.redirectUrl;
-                            }} catch(e) {{}}
-                        }}
-                        return t.substring(0, 500);
-                    }}""")
-                    log.info(f"Resend result: {result}")
-                except Exception as e:
-                    log.warning(f"Resend failed: {e}")
         else:
             log.warning("No checkout frame found")
             js_click(page, "Place My Order", partial=True)
