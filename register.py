@@ -180,74 +180,82 @@ def register(day):
                 checkout_frame = frame
                 break
 
+        import json as _json
+        import requests as _requests
+
         if checkout_frame:
             log.info(f"Checkout frame found: {checkout_frame.url[:80]}")
 
-            # Extract financeInfoId directly from the server model in the page
+            # Extract financeInfoId and shoppingCartKey from page
             finance_info_id = checkout_frame.evaluate("""() => {
-                try {
-                    // The model is embedded as a JS variable in the page
-                    const scripts = [...document.querySelectorAll('script')];
-                    for (const s of scripts) {
-                        const m = s.textContent.match(/"financeInfoId":"([^"]+)"/);
-                        if (m) return m[1];
-                    }
-                } catch(e) {}
+                const scripts = [...document.querySelectorAll('script')];
+                for (const s of scripts) {
+                    const m = s.textContent.match(/"financeInfoId":"([^"]+)"/);
+                    if (m) return m[1];
+                }
                 return null;
             }""")
-            log.info(f"financeInfoId from page: {finance_info_id}")
+            log.info(f"financeInfoId: {finance_info_id}")
 
-            import json as _json
+            # Get shopping cart key from current page URL
+            cart_key = ""
+            if "shoppingCartKey=" in page.url:
+                cart_key = page.url.split("shoppingCartKey=")[1].split("&")[0]
+            log.info(f"Cart key: {cart_key}")
 
-            # Click the button — this triggers ProcessTransaction request
-            btn = checkout_frame.locator("button.process-now").first
-            btn.scroll_into_view_if_needed()
-            page.wait_for_timeout(500)
+            # Extract all cookies from the browser context
+            cookies = context.cookies()
+            cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
+            log.info(f"Cookies extracted: {len(cookies)} cookies")
 
-            # Use expect_request to capture the ProcessTransaction call
-            with context.expect_event("request", lambda r: "ProcessTransaction" in r.url, timeout=10000) as req_info:
-                btn.click(force=True, timeout=10000)
-                log.info("Clicked Place My Order")
+            # Make the ProcessTransaction call directly using requests
+            # with the browser's session cookies (bypasses reCAPTCHA check)
+            payload = {
+                "payNow": {
+                    "creditCardPayments": [],
+                    "subsidyPayments": [],
+                    "creditCardFinanceInfoPayments": [
+                        {"financeInfoId": finance_info_id, "cvv": None}
+                    ] if finance_info_id else [],
+                    "accountCreditPayments": [],
+                    "giftCardPayments": []
+                },
+                "payLater": {
+                    "creditCardPayments": [],
+                    "creditCardFinanceInfoPayments": []
+                },
+                "guestContactDetails": None,
+                "recaptchaToken": ""
+            }
 
-            try:
-                req = req_info.value
-                original_body = _json.loads(req.post_data)
-                log.info(f"Captured ProcessTransaction: {_json.dumps(original_body)[:300]}")
+            headers = {
+                "Content-Type": "application/json",
+                "Origin": "https://store-ca.perfectmind.com",
+                "Referer": checkout_frame.url,
+                "Cookie": cookie_str,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
 
-                # Add credit card and resend
-                original_body['payNow']['creditCardFinanceInfoPayments'] = [
-                    {"financeInfoId": finance_info_id, "cvv": None}
-                ]
-                fixed_body = _json.dumps(original_body)
-                req_url = req.url
-                req_headers = dict(req.headers)
+            tx_url = f"https://store-ca.perfectmind.com/ProcessTransaction?pmOrgNumber=23615"
+            log.info(f"Calling ProcessTransaction directly: {tx_url}")
 
-                result = checkout_frame.evaluate(f"""async () => {{
-                    const r = await fetch("{req_url}", {{
-                        method: "POST",
-                        headers: {_json.dumps(req_headers)},
-                        credentials: "include",
-                        body: {_json.dumps(fixed_body)}
-                    }});
-                    const t = await r.text();
-                    try {{
-                        const j = JSON.parse(t);
-                        if (j.redirectUrl) window.top.location.href = j.redirectUrl;
-                    }} catch(e) {{}}
-                    return t.substring(0, 500);
-                }}""")
-                log.info(f"Resend result: {result}")
-            except Exception as e:
-                log.warning(f"Could not capture/resend request: {e}")
+            resp = _requests.post(tx_url, json=payload, headers=headers, timeout=30)
+            log.info(f"ProcessTransaction response: {resp.status_code} - {resp.text[:500]}")
+
+            # Handle redirect from response
+            if resp.status_code == 200:
+                try:
+                    resp_json = resp.json()
+                    redirect_url = resp_json.get("redirectUrl", "")
+                    if redirect_url:
+                        log.info(f"Redirecting to: {redirect_url}")
+                        page.goto(redirect_url, wait_until="domcontentloaded", timeout=15000)
+                except Exception:
+                    pass
         else:
             log.warning("No checkout frame found")
             js_click(page, "Place My Order", partial=True)
 
-        # Wait for response
-        try:
-            page.wait_for_load_state("networkidle", timeout=15000)
-        except Exception:
-            pass
         page.wait_for_timeout(5000)
 
         page.screenshot(path="final.png")
