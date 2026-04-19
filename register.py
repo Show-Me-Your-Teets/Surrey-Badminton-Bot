@@ -208,50 +208,55 @@ def register(day):
             cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
             log.info(f"Cookies extracted: {len(cookies)} cookies")
 
-            # Make the ProcessTransaction call directly using requests
-            # with the browser's session cookies (bypasses reCAPTCHA check)
-            payload = {
-                "payNow": {
-                    "creditCardPayments": [],
-                    "subsidyPayments": [],
-                    "creditCardFinanceInfoPayments": [
-                        {"financeInfoId": finance_info_id, "cvv": None}
-                    ] if finance_info_id else [],
-                    "accountCreditPayments": [],
-                    "giftCardPayments": []
-                },
-                "payLater": {
-                    "creditCardPayments": [],
-                    "creditCardFinanceInfoPayments": []
-                },
-                "guestContactDetails": None,
-                "recaptchaToken": ""
-            }
-
-            headers = {
-                "Content-Type": "application/json",
-                "Origin": "https://store-ca.perfectmind.com",
-                "Referer": checkout_frame.url,
-                "Cookie": cookie_str,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-
             tx_url = f"https://store-ca.perfectmind.com/ProcessTransaction?pmOrgNumber=23615"
-            log.info(f"Calling ProcessTransaction directly: {tx_url}")
 
-            resp = _requests.post(tx_url, json=payload, headers=headers, timeout=30)
-            log.info(f"ProcessTransaction response: {resp.status_code} - {resp.text[:500]}")
+            # Click the button to generate a valid reCAPTCHA token
+            # then capture the request body (which contains the token)
+            btn = checkout_frame.locator("button.process-now").first
+            btn.scroll_into_view_if_needed()
+            page.wait_for_timeout(500)
 
-            # Handle redirect from response
-            if resp.status_code == 200:
-                try:
-                    resp_json = resp.json()
-                    redirect_url = resp_json.get("redirectUrl", "")
-                    if redirect_url:
-                        log.info(f"Redirecting to: {redirect_url}")
-                        page.goto(redirect_url, wait_until="domcontentloaded", timeout=15000)
-                except Exception:
-                    pass
+            # Capture the request using Playwright's expect_request
+            captured_body = None
+            captured_headers = None
+            try:
+                with page.expect_request(lambda r: "ProcessTransaction" in r.url, timeout=8000) as req_info:
+                    btn.click(force=True)
+                captured_body = req_info.value.post_data
+                captured_headers = dict(req_info.value.headers)
+                log.info(f"Captured request body: {captured_body[:300] if captured_body else 'none'}")
+            except Exception as e:
+                log.warning(f"Could not capture request: {e}")
+
+            page.wait_for_timeout(2000)
+
+            if captured_body and finance_info_id:
+                # Parse the captured body and add the credit card
+                body = _json.loads(captured_body)
+                body['payNow']['creditCardFinanceInfoPayments'] = [
+                    {"financeInfoId": finance_info_id, "cvv": None}
+                ]
+                log.info(f"Resending with credit card: {_json.dumps(body)[:300]}")
+
+                # Use the captured headers (includes auth cookies) + add cookie header
+                headers = captured_headers or {}
+                headers["Cookie"] = cookie_str
+                headers["Content-Type"] = "application/json"
+
+                resp = _requests.post(tx_url, data=_json.dumps(body), headers=headers, timeout=30)
+                log.info(f"ProcessTransaction response: {resp.status_code} - {resp.text[:500]}")
+
+                if resp.status_code == 200:
+                    try:
+                        resp_json = resp.json()
+                        redirect_url = resp_json.get("redirectUrl", "")
+                        if redirect_url:
+                            log.info(f"Redirecting to: {redirect_url}")
+                            page.goto(redirect_url, wait_until="domcontentloaded", timeout=15000)
+                    except Exception:
+                        pass
+            else:
+                log.warning("No captured body or financeInfoId — cannot resend")
         else:
             log.warning("No checkout frame found")
             js_click(page, "Place My Order", partial=True)
