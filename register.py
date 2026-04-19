@@ -167,24 +167,63 @@ def register(day):
 
         if checkout_frame:
             log.info(f"Checkout frame found: {checkout_frame.url[:80]}")
-            try:
-                # Use Playwright's native locator with force=True
-                btn = checkout_frame.locator("button.process-now").first
-                btn.wait_for(state="attached", timeout=5000)
-                log.info(f"Button text: {btn.inner_text()}, visible: {btn.is_visible()}")
-                # Scroll into view and click with Playwright
-                btn.scroll_into_view_if_needed()
-                page.wait_for_timeout(500)
-                btn.click(force=True, timeout=10000)
-                log.info("Clicked via Playwright force click")
-            except Exception as e:
-                log.warning(f"Playwright click failed: {e}, trying JS...")
-                checkout_frame.evaluate("""() => {
-                    const btn = document.querySelector('button.process-now');
-                    if (btn) btn.click();
-                }""")
+
+            # Get the financeInfoId and recaptcha site key from the page model
+            model_data = checkout_frame.evaluate("""() => {
+                const ko = window.ko;
+                const btn = document.querySelector('button.process-now');
+                if (!btn || !ko) return null;
+                const vm = ko.contextFor(btn)?.$data;
+                if (!vm) return null;
+                const cards = vm.user && vm.user.clientCreditCards ? ko.unwrap(vm.user.clientCreditCards) : [];
+                return {
+                    financeInfoId: cards.length > 0 ? ko.unwrap(cards[0].financeInfoId) : null,
+                    contactId: vm.user ? ko.unwrap(vm.user.userContactId) : null,
+                };
+            }""")
+            log.info(f"Model data: {model_data}")
+
+            # Click the button to get a valid recaptcha token generated
+            btn = checkout_frame.locator("button.process-now").first
+            btn.scroll_into_view_if_needed()
+            page.wait_for_timeout(500)
+            btn.click(force=True, timeout=10000)
+            log.info("Clicked Place My Order")
+
+            # Wait for the request to be captured
+            page.wait_for_timeout(3000)
+
+            # If we captured a request, resend it with the credit card filled in
+            if captured_requests and model_data and model_data.get('financeInfoId'):
+                import json
+                req = captured_requests[0]
+                try:
+                    body = json.loads(req['post_data'])
+                    log.info(f"Original body: {json.dumps(body)[:300]}")
+
+                    # Add the credit card to the payment
+                    finance_id = model_data['financeInfoId']
+                    body['payNow']['creditCardFinanceInfoPayments'] = [{
+                        "financeInfoId": finance_id,
+                        "cvv": None
+                    }]
+
+                    # Resend with the fixed payload using fetch from the checkout frame
+                    fixed_body = json.dumps(body)
+                    result = checkout_frame.evaluate(f"""async () => {{
+                        const resp = await fetch('{req['url']}', {{
+                            method: 'POST',
+                            headers: {{'Content-Type': 'application/json'}},
+                            credentials: 'include',
+                            body: {json.dumps(fixed_body)}
+                        }});
+                        return await resp.text();
+                    }}""")
+                    log.info(f"Fixed request result: {result[:500]}")
+                except Exception as e:
+                    log.warning(f"Could not resend fixed request: {e}")
         else:
-            log.warning("No checkout frame found, trying js_click")
+            log.warning("No checkout frame found")
             js_click(page, "Place My Order", partial=True)
 
         # Wait for response
@@ -193,13 +232,6 @@ def register(day):
         except Exception:
             pass
         page.wait_for_timeout(5000)
-
-        # Log intercepted requests
-        log.info(f"Captured {len(captured_requests)} ProcessTransaction requests")
-        for r in captured_requests:
-            log.info(f"  URL: {r['url']}")
-            log.info(f"  Method: {r['method']}")
-            log.info(f"  Body: {r['post_data'][:500] if r['post_data'] else 'none'}")
 
         page.screenshot(path="final.png")
         log.info(f"Final URL: {page.url}")
