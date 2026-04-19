@@ -15,11 +15,16 @@ jobs:
           pip install -r requirements.txt
           playwright install chromium
           playwright install-deps chromium
+          sudo apt-get install -y xvfb
       - name: Register
         env:
           SURREY_EMAIL: ${{ secrets.SURREY_EMAIL }}
           SURREY_PASSWORD: ${{ secrets.SURREY_PASSWORD }}
-        run: python register.py --day tuesday
+          DISPLAY: :99
+        run: |
+          Xvfb :99 -screen 0 1280x900x24 &
+          sleep 2
+          python register.py --day tuesday
       - name: Upload debug files
         if: always()
         uses: actions/upload-artifact@v4
