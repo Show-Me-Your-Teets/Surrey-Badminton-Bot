@@ -168,60 +168,76 @@ def register(day):
         if checkout_frame:
             log.info(f"Checkout frame found: {checkout_frame.url[:80]}")
 
-            # Get the financeInfoId and recaptcha site key from the page model
-            model_data = checkout_frame.evaluate("""() => {
-                const ko = window.ko;
-                const btn = document.querySelector('button.process-now');
-                if (!btn || !ko) return null;
-                const vm = ko.contextFor(btn)?.$data;
-                if (!vm) return null;
-                const cards = vm.user && vm.user.clientCreditCards ? ko.unwrap(vm.user.clientCreditCards) : [];
-                return {
-                    financeInfoId: cards.length > 0 ? ko.unwrap(cards[0].financeInfoId) : null,
-                    contactId: vm.user ? ko.unwrap(vm.user.userContactId) : null,
+            # Extract financeInfoId directly from the server model in the page
+            finance_info_id = checkout_frame.evaluate("""() => {
+                try {
+                    // The model is embedded as a JS variable in the page
+                    const scripts = [...document.querySelectorAll('script')];
+                    for (const s of scripts) {
+                        const m = s.textContent.match(/"financeInfoId":"([^"]+)"/);
+                        if (m) return m[1];
+                    }
+                } catch(e) {}
+                return null;
+            }""")
+            log.info(f"financeInfoId from page: {finance_info_id}")
+
+            # Set up fetch interceptor BEFORE clicking
+            checkout_frame.evaluate("""() => {
+                window._capturedBody = null;
+                window._capturedUrl = null;
+                const orig = window.fetch;
+                window.fetch = function(url, opts) {
+                    if (url && url.toString().includes('ProcessTransaction')) {
+                        window._capturedUrl = url.toString();
+                        window._capturedBody = opts && opts.body ? opts.body : null;
+                    }
+                    return orig.apply(this, arguments);
                 };
             }""")
-            log.info(f"Model data: {model_data}")
 
-            # Click the button to get a valid recaptcha token generated
+            # Click the button
             btn = checkout_frame.locator("button.process-now").first
             btn.scroll_into_view_if_needed()
             page.wait_for_timeout(500)
             btn.click(force=True, timeout=10000)
             log.info("Clicked Place My Order")
+            page.wait_for_timeout(4000)
 
-            # Wait for the request to be captured
-            page.wait_for_timeout(3000)
+            # Get the captured body and resend with credit card
+            captured = checkout_frame.evaluate("""() => ({
+                url: window._capturedUrl,
+                body: window._capturedBody
+            })""")
+            log.info(f"Captured: url={captured.get('url')}, body={str(captured.get('body'))[:300] if captured.get('body') else 'none'}")
 
-            # If we captured a request, resend it with the credit card filled in
-            if captured_requests and model_data and model_data.get('financeInfoId'):
-                import json
-                req = captured_requests[0]
+            if captured.get('body') and finance_info_id:
+                import json as _json
                 try:
-                    body = json.loads(req['post_data'])
-                    log.info(f"Original body: {json.dumps(body)[:300]}")
-
-                    # Add the credit card to the payment
-                    finance_id = model_data['financeInfoId']
-                    body['payNow']['creditCardFinanceInfoPayments'] = [{
-                        "financeInfoId": finance_id,
-                        "cvv": None
-                    }]
-
-                    # Resend with the fixed payload using fetch from the checkout frame
-                    fixed_body = json.dumps(body)
+                    body = _json.loads(captured['body'])
+                    body['payNow']['creditCardFinanceInfoPayments'] = [{"financeInfoId": finance_info_id, "cvv": None}]
+                    fixed = _json.dumps(body)
+                    url = captured['url']
                     result = checkout_frame.evaluate(f"""async () => {{
-                        const resp = await fetch('{req['url']}', {{
-                            method: 'POST',
-                            headers: {{'Content-Type': 'application/json'}},
-                            credentials: 'include',
-                            body: {json.dumps(fixed_body)}
+                        const r = await fetch("{url}", {{
+                            method: "POST",
+                            headers: {{"Content-Type": "application/json"}},
+                            credentials: "include",
+                            body: JSON.stringify({fixed})
                         }});
-                        return await resp.text();
+                        const t = await r.text();
+                        // Trigger redirect if success
+                        if (t.includes('redirectUrl') || r.ok) {{
+                            try {{
+                                const j = JSON.parse(t);
+                                if (j.redirectUrl) window.parent.location.href = j.redirectUrl;
+                            }} catch(e) {{}}
+                        }}
+                        return t.substring(0, 500);
                     }}""")
-                    log.info(f"Fixed request result: {result[:500]}")
+                    log.info(f"Resend result: {result}")
                 except Exception as e:
-                    log.warning(f"Could not resend fixed request: {e}")
+                    log.warning(f"Resend failed: {e}")
         else:
             log.warning("No checkout frame found")
             js_click(page, "Place My Order", partial=True)
