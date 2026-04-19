@@ -1,2 +1,3 @@
 playwright>=1.43.0
 pytz>=2024.1
+requests>=2.31.0
