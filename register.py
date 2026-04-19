@@ -1,6 +1,5 @@
 """
 Surrey Recreation - Badminton Auto-Registration Bot
-Strategy: Login first, then navigate to registration URL (already authenticated)
 """
 
 import os
@@ -15,13 +14,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 WIDGET_ID = "b4059e75-9755-401f-a7b5-d7c75361420d"
-BASE_URL  = "https://cityofsurrey.perfectmind.com"
-LOGIN_URL = "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authorize?client_id=9082628b-1eed-4ccb-9ba9-bae04e1f4d13&response_type=code&scope=openid%20email%20profile&redirect_uri=https%3A//www.surrey.ca/openid-connect/generic&state=kqpp3LJd00-CdKqRZZCoCX9YafSq8Z3menVhsqEDYGM&prompt=login"
+BASE_URL   = "https://cityofsurrey.perfectmind.com"
+LOGIN_URL  = "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authorize?client_id=9082628b-1eed-4ccb-9ba9-bae04e1f4d13&response_type=code&scope=openid%20email%20profile&redirect_uri=https%3A//www.surrey.ca/openid-connect/generic&state=kqpp3LJd00-CdKqRZZCoCX9YafSq8Z3menVhsqEDYGM&prompt=login"
 
 SESSIONS = {
     "monday":    {"name": "Drop In Badminton 13+ - Newton (Mon 6:45pm)",                 "event_id": "65abb86d-b638-c9ff-b0f5-64f5db71c690", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 0},
     "tuesday":   {"name": "Drop In Badminton Adult - Chuck Bailey (Tue 6:30pm)",         "event_id": "21421a18-8d3f-78b6-0c0d-0d996bbc1ebb", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 1},
-    "wednesday": {"name": "Drop In Badminton 13+ - Newton (Wed 7:00pm)",                 "event_id": "d01f26e7-3dc0-7f33-d611-c305bc786f9c",        "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6",  "weekday": 2},
+    "wednesday": {"name": "Drop In Badminton 13+ - Newton (Wed 7:00pm)",                 "event_id": "d01f26e7-3dc0-7f33-d611-c305bc786f9c", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 2},
     "thursday":  {"name": "Drop In Badminton Adult - Guildford (Thu 7:00pm)",            "event_id": "REPLACE_WITH_THURSDAY_EVENT_ID",         "location_id": "REPLACE_WITH_THURSDAY_LOCATION_ID",   "weekday": 3},
     "friday":    {"name": "Drop In Badminton Children with Adult - Guildford (Fri 5pm)", "event_id": "REPLACE_WITH_FRIDAY_EVENT_ID",           "location_id": "REPLACE_WITH_FRIDAY_LOCATION_ID",     "weekday": 4},
     "saturday":  {"name": "Drop In Badminton Adult - Guildford (Sat 6:00pm)",            "event_id": "REPLACE_WITH_SATURDAY_EVENT_ID",         "location_id": "REPLACE_WITH_SATURDAY_LOCATION_ID",   "weekday": 5},
@@ -39,31 +38,23 @@ def get_occurrence_date(session):
 
 
 def js_click(page, text, partial=False):
-    """Click any clickable element by text across all frames."""
-    # The Next button on this site is an <a class="bm-button"> not a <button>
-    # So we search all clickable elements: buttons, inputs, anchors, spans
     for frame in page.frames:
         try:
             cmp = "t.includes" if partial else "t ==="
             found = frame.evaluate(f"""() => {{
-                const els = [...document.querySelectorAll('button, input[type=submit], a, span[role=button], div[role=button]')];
+                const els = [...document.querySelectorAll('button, input[type=submit], a, span[role=button]')];
                 const el = els.find(e => {{
                     const t = (e.innerText || e.textContent || e.value || e.title || '').trim();
                     return {cmp}('{text}');
                 }});
-                if (el) {{
-                    el.scrollIntoView();
-                    el.click();
-                    el.dispatchEvent(new MouseEvent('click', {{bubbles: true, cancelable: true, view: window}}));
-                    return el.tagName + ':' + (el.className || '');
-                }}
+                if (el) {{ el.scrollIntoView(); el.click(); return el.tagName + ':' + (el.className||''); }}
                 return null;
             }}""")
             if found:
                 log.info(f"Clicked '{text}' ({found}) in frame: {frame.url[:70]}")
                 return True
-        except Exception as e:
-            log.debug(f"Frame error: {e}")
+        except Exception:
+            pass
     return False
 
 
@@ -90,21 +81,29 @@ def register(day):
     log.info(f"Date:    {occurrence_date}")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        browser = p.chromium.launch(headless=False, args=['--no-sandbox', '--disable-dev-shm-usage'])
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
 
-        # ── Phase 1: Login directly first ─────────────────────────────────────
-        log.info("Phase 1: Logging in...")
+        # Capture all network requests to find the ProcessTransaction call
+        captured_requests = []
+        def on_request(request):
+            if "ProcessTransaction" in request.url or "process" in request.url.lower():
+                captured_requests.append({
+                    "url": request.url,
+                    "method": request.method,
+                    "post_data": request.post_data
+                })
+
+        context.on("request", on_request)
+        page = context.new_page()
+
+        # ── Login ─────────────────────────────────────────────────────────────
+        log.info("Logging in...")
         page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
-        log.info(f"Login page URL: {page.url}")
-
-        # Fill credentials
         page.wait_for_selector("#loginradius-login-emailid", state="attached", timeout=15000)
         page.fill("#loginradius-login-emailid", email)
         page.fill("#loginradius-login-password", password)
-
-        # Unhide and click submit
         page.evaluate("""
             () => {
                 const btn = document.getElementById('loginradius-submit-login');
@@ -112,208 +111,115 @@ def register(day):
                 btn.click();
             }
         """)
-
-        # Wait until redirected away from accounts.surrey.ca
         for _ in range(30):
             page.wait_for_timeout(1000)
             if "accounts.surrey.ca" not in page.url:
                 break
-
         page.wait_for_timeout(2000)
-        log.info(f"After login URL: {page.url}")
+        log.info(f"Logged in. URL: {page.url}")
 
-        if "accounts.surrey.ca" in page.url:
-            log.error("Login failed — still on login page. Check credentials.")
-            sys.exit(1)
-
-        log.info("✅ Login successful!")
-
-        # ── Phase 2: Clear any stale cart first ──────────────────────────────
-        log.info("Phase 2: Clearing any stale cart...")
-        cart_url = f"{BASE_URL}/23615/Menu/SocialSite/MemberCheckout"
-        page.goto(cart_url, wait_until="domcontentloaded", timeout=30000)
+        # ── Clear stale cart ──────────────────────────────────────────────────
+        page.goto(f"{BASE_URL}/23615/Menu/SocialSite/MemberCheckout", wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
         if js_click(page, "Clear Cart", partial=True):
-            log.info("Cleared existing cart")
+            log.info("Cleared cart")
             page.wait_for_timeout(2000)
-            # Confirm clear if dialog appears
-            js_click(page, "Yes", partial=False)
-            page.wait_for_timeout(2000)
-        else:
-            log.info("No cart to clear")
 
-        # ── Phase 3: Navigate to registration page ────────────────────────────
-        log.info("Phase 3: Navigating to registration page...")
+        # ── Navigate to registration page ─────────────────────────────────────
+        log.info("Loading registration page...")
         page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(5000)
-        log.info(f"Reg page URL: {page.url}")
+        log.info(f"Reg page: {page.url}")
 
-        # Dismiss any remaining cart popup
+        # Dismiss cart popup
         page.wait_for_timeout(1000)
         if js_click(page, "Continue"):
-            log.info("Dismissed cart popup (Continue)")
-            page.wait_for_timeout(3000)
-        elif js_click(page, "Add Anyway"):
-            log.info("Dismissed cart popup (Add Anyway)")
+            log.info("Dismissed popup")
             page.wait_for_timeout(3000)
 
-        # Take screenshot and dump page HTML for debugging
         page.screenshot(path="debug.png")
-        # Dump full page HTML so we can see structure
-        html = page.content()
-        with open("page_source.html", "w") as f:
-            f.write(html)
-        log.info(f"Page source saved ({len(html)} chars). Frames: {len(page.frames)}")
-        for i, frame in enumerate(page.frames):
-            log.info(f"  Frame {i}: {frame.url}")
-            try:
-                fhtml = frame.content()
-                with open(f"frame_{i}.html", "w") as f:
-                    f.write(fhtml)
-                log.info(f"  Frame {i} source saved ({len(fhtml)} chars)")
-            except Exception as e:
-                log.info(f"  Frame {i} error: {e}")
 
-        # The form is inside an iframe. Find the correct frame first.
-        def get_form_frame():
-            """Return the frame that contains the registration form."""
-            for frame in page.frames:
-                try:
-                    has_next = frame.evaluate("""
-                        () => [...document.querySelectorAll('button')]
-                              .some(b => b.textContent.trim() === 'Next')
-                    """)
-                    if has_next:
-                        return frame
-                except Exception:
-                    pass
-            return None
-
-        def click_in_form(text, partial=False):
-            """Click a button in the registration form frame."""
-            frame = get_form_frame()
-            if frame:
-                cmp = f"b.textContent.includes('{text}')" if partial else f"b.textContent.trim() === '{text}'"
-                result = frame.evaluate(f"""() => {{
-                    const btn = [...document.querySelectorAll('button')].find(b => {cmp});
-                    if (btn) {{
-                        btn.scrollIntoView();
-                        btn.dispatchEvent(new MouseEvent('click', {{bubbles:true, cancelable:true, view:window}}));
-                        return btn.textContent.trim();
-                    }}
-                    return null;
-                }}""")
-                log.info(f"Clicked in form frame: {result} (frame: {frame.url[:60]})")
-                return result is not None
-            # fallback to js_click
-            log.warning(f"Form frame not found, falling back to js_click for '{text}'")
-            return js_click(page, text, partial)
-
-        # ── Step 1: Attendees — click Next ────────────────────────────────────
-        log.info("Step 1/3: Clicking Next (Attendees)...")
-        page.wait_for_timeout(3000)
-        click_in_form("Next")
-        page.wait_for_timeout(4000)
-        log.info("Step 1 done")
-
-        # ── Step 2: Fees — select free pass ($0.00), click Next ───────────────
-        log.info("Step 2/3: Selecting free pass, clicking Next (Fees)...")
+        # ── Step 1: Next (Attendees) ──────────────────────────────────────────
+        log.info("Step 1: Next...")
         page.wait_for_timeout(2000)
-        frame = get_form_frame()
-        if frame:
-            frame.evaluate("""() => {
-                const labels = [...document.querySelectorAll('label')];
-                const lbl = labels.find(l => l.textContent.includes('Rec Surrey Pass'));
-                if (lbl) lbl.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
-            }""")
-        page.wait_for_timeout(1000)
-        click_in_form("Next")
+        js_click(page, "Next")
         page.wait_for_timeout(4000)
-        log.info("Step 2 done")
 
-        # ── Step 3: Payment — Select credit card then Place My Order ────────
-        log.info("Step 3/3: Selecting credit card and clicking Place My Order...")
-        page.wait_for_timeout(3000)
+        # ── Step 2: Next (Fees) ───────────────────────────────────────────────
+        log.info("Step 2: Next...")
+        page.wait_for_timeout(2000)
+        js_click(page, "Rec Surrey Pass", partial=True)
+        page.wait_for_timeout(500)
+        js_click(page, "Next")
+        page.wait_for_timeout(4000)
+
+        # ── Step 3: Place My Order ────────────────────────────────────────────
+        log.info("Step 3: Place My Order...")
+        page.wait_for_timeout(2000)
         page.screenshot(path="step3.png")
 
-        # Find the checkout frame (store-ca.perfectmind.com)
+        # Find checkout frame and use Playwright's native click (most reliable)
         checkout_frame = None
         for frame in page.frames:
-            if "store-ca.perfectmind.com" in frame.url or "checkout" in frame.url:
+            if "store-ca.perfectmind.com" in frame.url:
                 checkout_frame = frame
                 break
-        if not checkout_frame:
-            log.warning("Checkout frame not found, trying all frames...")
-            for frame in page.frames:
-                log.info(f"  Available frame: {frame.url[:80]}")
-            checkout_frame = page.main_frame
 
-        log.info(f"Using checkout frame: {checkout_frame.url[:70]}")
+        if checkout_frame:
+            log.info(f"Checkout frame found: {checkout_frame.url[:80]}")
+            try:
+                # Use Playwright's native locator with force=True
+                btn = checkout_frame.locator("button.process-now").first
+                btn.wait_for(state="attached", timeout=5000)
+                log.info(f"Button text: {btn.inner_text()}, visible: {btn.is_visible()}")
+                # Scroll into view and click with Playwright
+                btn.scroll_into_view_if_needed()
+                page.wait_for_timeout(500)
+                btn.click(force=True, timeout=10000)
+                log.info("Clicked via Playwright force click")
+            except Exception as e:
+                log.warning(f"Playwright click failed: {e}, trying JS...")
+                checkout_frame.evaluate("""() => {
+                    const btn = document.querySelector('button.process-now');
+                    if (btn) btn.click();
+                }""")
+        else:
+            log.warning("No checkout frame found, trying js_click")
+            js_click(page, "Place My Order", partial=True)
 
-        # Dump checkout frame HTML for debugging
-        try:
-            fhtml = checkout_frame.content()
-            with open("checkout_frame.html", "w") as f:
-                f.write(fhtml)
-            log.info(f"Checkout frame HTML saved ({len(fhtml)} chars)")
-        except Exception as e:
-            log.warning(f"Could not dump checkout frame: {e}")
-
-        # Intercept the actual network request by patching fetch before clicking
-        checkout_frame.evaluate("""() => {
-            window._interceptedRequests = [];
-            const origFetch = window.fetch;
-            window.fetch = function(url, opts) {
-                window._interceptedRequests.push({
-                    url: url,
-                    method: opts && opts.method,
-                    body: opts && opts.body
-                });
-                return origFetch.apply(this, arguments);
-            };
-        }""")
-
-        # Now click the button the normal way
-        checkout_frame.evaluate("""() => {
-            const btn = [...document.querySelectorAll('button.process-now')][0];
-            if (btn) btn.click();
-        }""")
-        page.wait_for_timeout(3000)
-
-        # Capture what was sent
-        intercepted = checkout_frame.evaluate("() => JSON.stringify(window._interceptedRequests)")
-        log.info(f"Intercepted requests: {intercepted[:1000]}")
-
-        # Wait for confirmation page to fully load
+        # Wait for response
         try:
             page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
         page.wait_for_timeout(5000)
-        # Wait longer for the order confirmation to fully load
-        page.wait_for_timeout(8000)
-        log.info(f"Final URL: {page.url}")
-        page.screenshot(path="final.png")
 
-        # ── Confirm success — check all frames ───────────────────────────────
-        # The thank you page may be inside an iframe
+        # Log intercepted requests
+        log.info(f"Captured {len(captured_requests)} ProcessTransaction requests")
+        for r in captured_requests:
+            log.info(f"  URL: {r['url']}")
+            log.info(f"  Method: {r['method']}")
+            log.info(f"  Body: {r['post_data'][:500] if r['post_data'] else 'none'}")
+
+        page.screenshot(path="final.png")
+        log.info(f"Final URL: {page.url}")
+
+        # Check all frames for confirmation
         full_text = ""
         for frame in page.frames:
             try:
                 full_text += frame.inner_text("body").lower() + " "
             except Exception:
                 pass
-        log.info(f"Full page text: {full_text[:500]}")
-        page.screenshot(path="final.png")
 
         if "thank you" in full_text:
             log.info("✅ Registration successful!")
-        elif "already registered" in full_text or "already booked" in full_text:
-            log.info("✅ Already registered for this session.")
-        elif "receipt" in full_text or "confirmation" in full_text or "booked" in full_text:
+        elif "already registered" in full_text:
+            log.info("✅ Already registered.")
+        elif "receipt" in full_text or "confirmation" in full_text:
             log.info("✅ Registration confirmed!")
         else:
-            log.warning(f"⚠️ Could not confirm. Check final.png. Text: {full_text[:300]}")
+            log.warning(f"⚠️ Could not confirm. Text: {full_text[:400]}")
 
         browser.close()
 
