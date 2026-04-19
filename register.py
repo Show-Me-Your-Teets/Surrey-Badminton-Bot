@@ -197,37 +197,48 @@ def register(day):
             }""")
             log.info(f"financeInfoId from page: {finance_info_id}")
 
-            # Use Playwright route interception to modify the ProcessTransaction request
             import json as _json
 
-            def handle_route(route):
-                request = route.request
-                if "ProcessTransaction" in request.url:
-                    try:
-                        body = _json.loads(request.post_data)
-                        log.info(f"Intercepted ProcessTransaction: {_json.dumps(body)[:300]}")
-                        # Add the credit card
-                        if finance_info_id:
-                            body['payNow']['creditCardFinanceInfoPayments'] = [
-                                {"financeInfoId": finance_info_id, "cvv": None}
-                            ]
-                        log.info(f"Modified body: {_json.dumps(body)[:300]}")
-                        route.continue_(post_data=_json.dumps(body))
-                    except Exception as e:
-                        log.warning(f"Route modification failed: {e}")
-                        route.continue_()
-                else:
-                    route.continue_()
-
-            # Set up route interception for the checkout domain
-            context.route("**/ProcessTransaction**", handle_route)
-
-            # Click the button
+            # Click the button — this triggers ProcessTransaction request
             btn = checkout_frame.locator("button.process-now").first
             btn.scroll_into_view_if_needed()
             page.wait_for_timeout(500)
-            btn.click(force=True, timeout=10000)
-            log.info("Clicked Place My Order")
+
+            # Use expect_request to capture the ProcessTransaction call
+            with context.expect_event("request", lambda r: "ProcessTransaction" in r.url, timeout=10000) as req_info:
+                btn.click(force=True, timeout=10000)
+                log.info("Clicked Place My Order")
+
+            try:
+                req = req_info.value
+                original_body = _json.loads(req.post_data)
+                log.info(f"Captured ProcessTransaction: {_json.dumps(original_body)[:300]}")
+
+                # Add credit card and resend
+                original_body['payNow']['creditCardFinanceInfoPayments'] = [
+                    {"financeInfoId": finance_info_id, "cvv": None}
+                ]
+                fixed_body = _json.dumps(original_body)
+                req_url = req.url
+                req_headers = dict(req.headers)
+
+                result = checkout_frame.evaluate(f"""async () => {{
+                    const r = await fetch("{req_url}", {{
+                        method: "POST",
+                        headers: {_json.dumps(req_headers)},
+                        credentials: "include",
+                        body: {_json.dumps(fixed_body)}
+                    }});
+                    const t = await r.text();
+                    try {{
+                        const j = JSON.parse(t);
+                        if (j.redirectUrl) window.top.location.href = j.redirectUrl;
+                    }} catch(e) {{}}
+                    return t.substring(0, 500);
+                }}""")
+                log.info(f"Resend result: {result}")
+            except Exception as e:
+                log.warning(f"Could not capture/resend request: {e}")
         else:
             log.warning("No checkout frame found")
             js_click(page, "Place My Order", partial=True)
