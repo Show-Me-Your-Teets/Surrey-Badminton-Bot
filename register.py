@@ -1,6 +1,6 @@
 """
 Surrey Recreation - Badminton Auto-Registration Bot
-Clean simple version - lets the browser handle everything natively
+Automatically finds session URLs then registers.
 """
 
 import os
@@ -14,28 +14,23 @@ from playwright.sync_api import sync_playwright
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-WIDGET_ID = "b4059e75-9755-401f-a7b5-d7c75361420d"
-BASE_URL   = "https://cityofsurrey.perfectmind.com"
-LOGIN_URL  = "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authorize?client_id=9082628b-1eed-4ccb-9ba9-bae04e1f4d13&response_type=code&scope=openid%20email%20profile&redirect_uri=https%3A//www.surrey.ca/openid-connect/generic&state=kqpp3LJd00-CdKqRZZCoCX9YafSq8Z3menVhsqEDYGM&prompt=login"
+BASE_URL       = "https://cityofsurrey.perfectmind.com"
+FOCUSED_SEARCH = "https://www.surrey.ca/parks-recreation/activities-registration/focused-search"
+LOGIN_URL      = "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authorize?client_id=9082628b-1eed-4ccb-9ba9-bae04e1f4d13&response_type=code&scope=openid%20email%20profile&redirect_uri=https%3A//www.surrey.ca/openid-connect/generic&state=kqpp3LJd00-CdKqRZZCoCX9YafSq8Z3menVhsqEDYGM&prompt=login"
 
-SESSIONS = {
-    "monday":    {"name": "Newton Mon 6:45pm",       "event_id": "65abb86d-b638-c9ff-b0f5-64f5db71c690", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 0},
-    "tuesday":   {"name": "Chuck Bailey Tue 6:30pm", "event_id": "21421a18-8d3f-78b6-0c0d-0d996bbc1ebb", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 1},
-    "wednesday": {"name": "Newton Wed 7:00pm",       "event_id": "d01f26e7-3dc0-7f33-d611-c305bc786f9c", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 2},
-    "thursday":  {"name": "Guildford Thu 7:00pm",    "event_id": "REPLACE_WITH_THURSDAY_EVENT_ID",        "location_id": "REPLACE_WITH_THURSDAY_LOCATION_ID",   "weekday": 3},
-    "friday":    {"name": "Guildford Fri 5:00pm",    "event_id": "REPLACE_WITH_FRIDAY_EVENT_ID",          "location_id": "REPLACE_WITH_FRIDAY_LOCATION_ID",     "weekday": 4},
-    "saturday":  {"name": "Guildford Sat 6:00pm",    "event_id": "REPLACE_WITH_SATURDAY_EVENT_ID",        "location_id": "REPLACE_WITH_SATURDAY_LOCATION_ID",   "weekday": 5},
-    "sunday":    {"name": "Guildford Sun 8:30am",    "event_id": "382ea32a-2d21-5709-a715-8e6cd7562e9a", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 6},
+WEEKDAY_NAMES = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6
 }
 
 
-def get_occurrence_date(session):
+def get_target_date(weekday_num):
     pacific = pytz.timezone("America/Vancouver")
     now = datetime.now(pacific)
-    days_ahead = (session["weekday"] - now.weekday()) % 7
+    days_ahead = (weekday_num - now.weekday()) % 7
     if days_ahead == 0:
         days_ahead = 7
-    return (now + timedelta(days=days_ahead)).date().strftime("%Y%m%d")
+    return (now + timedelta(days=days_ahead)).date()
 
 
 def click_element(page, text, partial=False):
@@ -43,7 +38,7 @@ def click_element(page, text, partial=False):
         try:
             cmp = "t.includes" if partial else "t ==="
             found = frame.evaluate(f"""() => {{
-                const els = [...document.querySelectorAll('a, button, input[type=submit]')];
+                const els = [...document.querySelectorAll('a, button, input, label, span')];
                 const el = els.find(e => {{
                     const t = (e.innerText || e.textContent || e.value || '').trim();
                     return {cmp}('{text}');
@@ -52,38 +47,131 @@ def click_element(page, text, partial=False):
                 return false;
             }}""")
             if found:
-                log.info(f"Clicked '{text}' in {frame.url[:60]}")
+                log.info(f"Clicked '{text}'")
                 return True
         except Exception:
             pass
     return False
 
 
+def find_registration_url(page, target_date):
+    """
+    Uses the Surrey focused search to find Drop-In Badminton registration URL
+    for the target date. Follows the exact steps specified.
+    """
+    date_str = target_date.strftime("%Y%m%d")
+    log.info(f"Searching for badminton on {target_date.strftime('%A %d-%b-%Y')} ({date_str})...")
+
+    # Go to focused search
+    page.goto(FOCUSED_SEARCH, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(3000)
+    log.info(f"Focused search loaded: {page.url}")
+
+    # ── Step 1: Select Age Group - Adult (19-54 yrs) ─────────────────────────
+    log.info("Step 1: Selecting Adult (19-54 yrs)...")
+    try:
+        # Look for the Adult checkbox/radio/label
+        page.locator("text=Adult (19").first.click()
+        page.wait_for_timeout(1000)
+    except Exception:
+        click_element(page, "Adult", partial=True)
+        page.wait_for_timeout(1000)
+
+    # ── Step 2: Select Activity Type - Drop Ins ───────────────────────────────
+    log.info("Step 2: Selecting Drop Ins (Find one time activities)...")
+    try:
+        page.locator("text=Find one time activities").first.click()
+        page.wait_for_timeout(1000)
+    except Exception:
+        click_element(page, "Drop In", partial=True)
+        page.wait_for_timeout(1000)
+
+    # ── Step 3: Select Activity - Sports - Drop In Badminton ─────────────────
+    log.info("Step 3: Selecting Sports - Drop In Badminton...")
+    try:
+        page.locator("text=Sports - Drop In Badminton").first.click()
+        page.wait_for_timeout(1000)
+    except Exception:
+        click_element(page, "Badminton", partial=True)
+        page.wait_for_timeout(1000)
+
+    # ── Step 4: Select all locations ─────────────────────────────────────────
+    log.info("Step 4: Selecting all locations...")
+    locations = [
+        "Fraser Heights Recreation Centre",
+        "Guildford Recreation Centre",
+        "Newton Recreation Centre",
+        "Chuck Bailey Recreation Centre",
+    ]
+    for loc in locations:
+        try:
+            page.locator(f"text={loc}").first.click()
+            page.wait_for_timeout(300)
+        except Exception:
+            click_element(page, loc, partial=True)
+            page.wait_for_timeout(300)
+
+    # ── Show Results ──────────────────────────────────────────────────────────
+    log.info("Clicking Show Results...")
+    try:
+        page.locator("text=Show Results").first.click()
+    except Exception:
+        click_element(page, "Show Results", partial=True)
+    page.wait_for_timeout(5000)
+    page.screenshot(path="search_results.png")
+    log.info(f"Results page: {page.url}")
+
+    # ── Find the Register link for our target date ────────────────────────────
+    log.info(f"Looking for registration link with occurrenceDate={date_str}...")
+
+    # Search all frames for the link
+    for frame in page.frames:
+        try:
+            reg_url = frame.evaluate(f"""() => {{
+                const links = [...document.querySelectorAll('a[href*="BookMe4EventParticipants"]')];
+                const match = links.find(a => a.href.includes('occurrenceDate={date_str}'));
+                if (match) return match.href;
+
+                // Also try links near "Badminton" text that have a Register button
+                const allLinks = [...document.querySelectorAll('a[href*="BookMe4"]')];
+                const dateMatch = allLinks.find(a => a.href.includes('{date_str}'));
+                return dateMatch ? dateMatch.href : null;
+            }}""")
+            if reg_url:
+                log.info(f"Found: {reg_url}")
+                return reg_url
+        except Exception:
+            pass
+
+    # If not found by exact date, look for any badminton register link and log all found
+    log.warning(f"No exact date match. Logging all BookMe4 links found:")
+    for frame in page.frames:
+        try:
+            links = frame.evaluate("""() => {
+                return [...document.querySelectorAll('a[href*="BookMe4"]')]
+                    .map(a => a.href).filter(Boolean);
+            }""")
+            for link in links:
+                log.info(f"  Found link: {link[:120]}")
+        except Exception:
+            pass
+
+    return None
+
+
 def register(day):
-    email    = os.environ["SURREY_EMAIL"]
-    password = os.environ["SURREY_PASSWORD"]
-    session  = SESSIONS[day.lower()]
+    email       = os.environ["SURREY_EMAIL"]
+    password    = os.environ["SURREY_PASSWORD"]
+    weekday_num = WEEKDAY_NAMES[day.lower()]
+    target_date = get_target_date(weekday_num)
 
-    if "REPLACE_WITH" in session["event_id"]:
-        log.error(f"Event ID not set for {day}.")
-        sys.exit(1)
-
-    occurrence_date = get_occurrence_date(session)
-    reg_url = (
-        f"{BASE_URL}/23615/Menu/BookMe4EventParticipants"
-        f"?eventId={session['event_id']}"
-        f"&occurrenceDate={occurrence_date}"
-        f"&widgetId={WIDGET_ID}"
-        f"&locationId={session['location_id']}"
-        f"&waitListMode=False"
-    )
-
-    log.info(f"Session: {session['name']} | Date: {occurrence_date}")
+    log.info(f"Target: {day.title()} {target_date.strftime('%d-%b-%Y')}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=False,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
+            args=["--no-sandbox", "--disable-dev-shm-usage",
+                  "--disable-blink-features=AutomationControlled"]
         )
         context = browser.new_context(
             viewport={"width": 1280, "height": 900},
@@ -113,8 +201,22 @@ def register(day):
         page.wait_for_timeout(2000)
         log.info(f"Logged in: {page.url[:60]}")
 
+        # ── Find session URL ──────────────────────────────────────────────────
+        reg_url = find_registration_url(page, target_date)
+
+        if not reg_url:
+            log.error("Could not find session. Registration may not be open yet (opens 72h before).")
+            page.screenshot(path="debug.png")
+            browser.close()
+            sys.exit(1)
+
+        # Convert /Clients/ to /Menu/ (required after SSO login)
+        reg_url = reg_url.replace("/Clients/", "/Menu/")
+        log.info(f"Registration URL: {reg_url}")
+
         # ── Clear stale cart ──────────────────────────────────────────────────
-        page.goto(f"{BASE_URL}/23615/Menu/SocialSite/MemberCheckout", wait_until="domcontentloaded", timeout=30000)
+        page.goto(f"{BASE_URL}/23615/Menu/SocialSite/MemberCheckout",
+                  wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
         if click_element(page, "Clear Cart", partial=True):
             log.info("Cleared cart")
@@ -124,7 +226,6 @@ def register(day):
         log.info("Loading registration page...")
         page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(5000)
-        log.info(f"Reg page: {page.url[:80]}")
 
         if click_element(page, "Continue"):
             log.info("Dismissed popup")
@@ -132,14 +233,14 @@ def register(day):
 
         page.screenshot(path="debug.png")
 
-        # ── Step 1: Next ──────────────────────────────────────────────────────
+        # ── Step 1: Next (Attendees) ──────────────────────────────────────────
         log.info("Step 1: Next...")
         page.wait_for_timeout(2000)
         click_element(page, "Next")
         page.wait_for_timeout(4000)
 
-        # ── Step 2: Next ──────────────────────────────────────────────────────
-        log.info("Step 2: Next...")
+        # ── Step 2: Fees ──────────────────────────────────────────────────────
+        log.info("Step 2: Selecting free pass, Next...")
         page.wait_for_timeout(2000)
         click_element(page, "Rec Surrey Pass", partial=True)
         page.wait_for_timeout(500)
@@ -158,17 +259,14 @@ def register(day):
                 break
 
         if checkout_frame:
-            log.info(f"Checkout frame: {checkout_frame.url[:80]}")
             try:
                 btn = checkout_frame.locator("button.process-now").first
                 btn.wait_for(state="visible", timeout=10000)
-                log.info(f"Button visible: {btn.is_visible()}")
                 btn.click(timeout=10000)
                 log.info("Clicked Place My Order")
             except Exception as e:
-                log.warning(f"Visible click failed ({e}), trying force...")
+                log.warning(f"Visible click failed ({e}), force clicking...")
                 checkout_frame.locator("button.process-now").first.click(force=True)
-                log.info("Force clicked Place My Order")
         else:
             log.warning("Checkout frame not found!")
 
@@ -199,6 +297,7 @@ def register(day):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--day", required=True)
+    parser.add_argument("--day", required=True,
+                        help="monday/tuesday/wednesday/thursday/friday/saturday/sunday")
     args = parser.parse_args()
     register(args.day)
