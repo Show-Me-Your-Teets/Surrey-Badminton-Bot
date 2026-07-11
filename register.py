@@ -139,23 +139,27 @@ def find_registration_url(page, target_date):
             }}""")
             if reg_url:
                 log.info(f"Found: {reg_url}")
+                # If landing page, navigate to it and click Register
+                if "BookMe4LandingPages" in reg_url:
+                    landing = reg_url.replace("/Clients/", "/Menu/")
+                    page.goto(landing, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(3000)
+                    page.screenshot(path="landing_page.png")
+                    try:
+                        with page.expect_navigation(timeout=10000):
+                            page.locator("text=REGISTER").first.click()
+                        page.wait_for_timeout(2000)
+                        log.info(f"After Register click: {page.url}")
+                        if "eventId" in page.url or "BookMe4EventParticipants" in page.url:
+                            return page.url
+                    except Exception as e:
+                        log.warning(f"Register click failed: {e}")
                 return reg_url
         except Exception:
             pass
 
-    # If not found by exact date, look for any badminton register link and log all found
-    log.warning(f"No exact date match. Logging all BookMe4 links found:")
-    for frame in page.frames:
-        try:
-            links = frame.evaluate("""() => {
-                return [...document.querySelectorAll('a[href*="BookMe4"]')]
-                    .map(a => a.href).filter(Boolean);
-            }""")
-            for link in links:
-                log.info(f"  Found link: {link[:120]}")
-        except Exception:
-            pass
-
+    # If not found by exact date, log what was found
+    log.warning("No registration URL found.")
     return None
 
 
