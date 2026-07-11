@@ -4,7 +4,7 @@ on:
 jobs:
   register:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,14 +25,14 @@ jobs:
           Xvfb :99 -screen 0 1280x900x24 &
           sleep 2
           python register.py --day tuesday
-      - name: Upload debug files
+      - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: debug-test
           path: |
+            search_results.png
             debug.png
             step3.png
             final.png
-            checkout_frame.html
           if-no-files-found: ignore
