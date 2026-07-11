@@ -244,17 +244,26 @@ def find_and_register(page, target_date):
             break
 
     if checkout_frame:
-        log.info(f"Checkout frame found: {checkout_frame.url[:80]}")
+        log.info(f"Checkout frame: {checkout_frame.url[:80]}")
         try:
             btn = checkout_frame.locator("button.process-now").first
-            btn.wait_for(state="visible", timeout=10000)
-            btn.click(timeout=10000)
+            btn.wait_for(state="attached", timeout=10000)
+            log.info(f"Button found, visible={btn.is_visible()}")
+            btn.scroll_into_view_if_needed()
+            page.wait_for_timeout(1000)
+            # Use real mouse click via bounding box
+            box = btn.bounding_box()
+            if box:
+                log.info(f"Clicking at {box}")
+                page.mouse.click(box['x'] + box['width']/2, box['y'] + box['height']/2)
+            else:
+                btn.click(force=True)
             log.info("Clicked Place My Order")
         except Exception as e:
-            log.warning(f"Visible click failed ({e}), force clicking...")
-            checkout_frame.locator("button.process-now").first.click(force=True)
+            log.warning(f"Click failed: {e}")
+            checkout_frame.evaluate("() => { const b = document.querySelector('button.process-now'); if(b) b.click(); }")
     else:
-        log.warning("Checkout frame not found!")
+        log.warning("No checkout frame found!")
         for frame in page.frames:
             log.info(f"  Frame: {frame.url[:80]}")
 
