@@ -62,59 +62,29 @@ def click_el(page, text, partial=False):
 
 
 def login(page, email, password):
-    """Login via perfectmind's SSO which keeps session on perfectmind domain."""
-    log.info("Logging into perfectmind...")
-    page.goto(PM_LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+    """Login via MySurrey — the login page that appears when clicking Register."""
+    log.info("Logging in via MySurrey...")
+    # Go directly to the MySurrey login page (the one we see in screenshots)
+    page.goto("https://cityofsurrey.perfectmind.com/23615/Menu/BookMe4EventParticipants?eventId=c1713be0-fd03-f75a-6ad6-c8e29b17eb76&occurrenceDate=20260714&widgetId=b4059e75-9755-401f-a7b5-d7c75361420d&locationId=a89fe9f3-5ece-4158-a87d-c61ec1e99601&waitListMode=False",
+              wait_until="domcontentloaded", timeout=30000)
     page.wait_for_timeout(3000)
-    log.info(f"Login page: {page.url}")
+    log.info(f"Initial page: {page.url}")
     page.screenshot(path="login_page.png")
 
-    # perfectmind login page has email/password fields
-    try:
-        page.fill('input[type="email"], input[name="Email"], input[id*="email" i]', email)
+    # This redirects to accounts.surrey.ca login
+    if "accounts.surrey.ca" in page.url:
+        log.info("On MySurrey login page - filling credentials...")
+        # The login page shown in screenshots has standard email/password inputs
+        page.wait_for_selector('input[name="Email"], input[id="Email"], input[type="email"]',
+                               state="visible", timeout=15000)
+        page.fill('input[name="Email"], input[id="Email"], input[type="email"]', email)
         page.fill('input[type="password"]', password)
-        page.click('button[type="submit"], input[type="submit"]')
-        page.wait_for_load_state("networkidle", timeout=20000)
-        page.wait_for_timeout(2000)
+        page.screenshot(path="login_filled.png")
+        page.click('button[type="submit"], input[type="submit"], button:has-text("Sign in")')
+        page.wait_for_load_state("networkidle", timeout=30000)
+        page.wait_for_timeout(3000)
         log.info(f"After login: {page.url}")
         page.screenshot(path="after_login.png")
-
-        if "Login" not in page.title() and "login" not in page.url.lower():
-            log.info("✅ Logged into perfectmind successfully")
-            return True
-    except Exception as e:
-        log.warning(f"Direct login failed: {e}")
-
-    # Fallback: use MySurrey SSO
-    log.info("Trying MySurrey SSO login...")
-    # Click login with MySurrey if available
-    try:
-        page.locator("text=MySurrey").first.click()
-        page.wait_for_load_state("domcontentloaded", timeout=15000)
-        page.wait_for_timeout(2000)
-    except Exception:
-        pass
-
-    # Fill Surrey login form
-    if "accounts.surrey.ca" in page.url or "surrey.ca" in page.url:
-        page.wait_for_selector("#loginradius-login-emailid", state="attached", timeout=15000)
-        page.fill("#loginradius-login-emailid", email)
-        page.fill("#loginradius-login-password", password)
-        page.evaluate("""
-            () => {
-                const btn = document.getElementById('loginradius-submit-login');
-                if (btn) {
-                    btn.style.cssText = 'display:block!important;visibility:visible!important;opacity:1!important;';
-                    btn.click();
-                }
-            }
-        """)
-        for _ in range(30):
-            page.wait_for_timeout(1000)
-            if "accounts.surrey.ca" not in page.url:
-                break
-        page.wait_for_timeout(2000)
-        log.info(f"After SSO: {page.url}")
         return True
 
     return False
