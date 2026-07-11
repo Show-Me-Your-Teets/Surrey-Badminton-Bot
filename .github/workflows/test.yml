@@ -32,10 +32,10 @@ jobs:
           name: debug-test
           path: |
             login_page.png
+            login_filled.png
             after_login.png
             search_results.png
             landing_page.png
-            landing_page_after_login.png
             debug.png
             step3.png
             final.png
