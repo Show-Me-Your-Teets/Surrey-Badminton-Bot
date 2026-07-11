@@ -80,7 +80,18 @@ def login(page, email, password):
         page.fill('input[name="Email"], input[id="Email"], input[type="email"]', email)
         page.fill('input[type="password"]', password)
         page.screenshot(path="login_filled.png")
-        page.click('button[type="submit"], input[type="submit"], button:has-text("Sign in")')
+        # Submit button is hidden by CSS - use JS to click it
+        page.evaluate("""
+            () => {
+                const btn = document.getElementById('loginradius-submit-login')
+                    || document.querySelector('input[type="submit"]')
+                    || document.querySelector('button[type="submit"]');
+                if (btn) {
+                    btn.style.cssText = 'display:block!important;visibility:visible!important;opacity:1!important;';
+                    btn.click();
+                }
+            }
+        """)
         page.wait_for_load_state("networkidle", timeout=30000)
         page.wait_for_timeout(3000)
         log.info(f"After login: {page.url}")
