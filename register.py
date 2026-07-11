@@ -1,5 +1,6 @@
 """
 Surrey Recreation - Badminton Auto-Registration Bot
+Clean simple version - lets the browser handle everything natively
 """
 
 import os
@@ -18,13 +19,13 @@ BASE_URL   = "https://cityofsurrey.perfectmind.com"
 LOGIN_URL  = "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authorize?client_id=9082628b-1eed-4ccb-9ba9-bae04e1f4d13&response_type=code&scope=openid%20email%20profile&redirect_uri=https%3A//www.surrey.ca/openid-connect/generic&state=kqpp3LJd00-CdKqRZZCoCX9YafSq8Z3menVhsqEDYGM&prompt=login"
 
 SESSIONS = {
-    "monday":    {"name": "Drop In Badminton 13+ - Newton (Mon 6:45pm)",                 "event_id": "65abb86d-b638-c9ff-b0f5-64f5db71c690", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 0},
-    "tuesday":   {"name": "Drop In Badminton Adult - Chuck Bailey (Tue 6:30pm)",         "event_id": "21421a18-8d3f-78b6-0c0d-0d996bbc1ebb", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 1},
-    "wednesday": {"name": "Drop In Badminton 13+ - Newton (Wed 7:00pm)",                 "event_id": "d01f26e7-3dc0-7f33-d611-c305bc786f9c", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 2},
-    "thursday":  {"name": "Drop In Badminton Adult - Guildford (Thu 7:00pm)",            "event_id": "REPLACE_WITH_THURSDAY_EVENT_ID",         "location_id": "REPLACE_WITH_THURSDAY_LOCATION_ID",   "weekday": 3},
-    "friday":    {"name": "Drop In Badminton Children with Adult - Guildford (Fri 5pm)", "event_id": "REPLACE_WITH_FRIDAY_EVENT_ID",           "location_id": "REPLACE_WITH_FRIDAY_LOCATION_ID",     "weekday": 4},
-    "saturday":  {"name": "Drop In Badminton Adult - Guildford (Sat 6:00pm)",            "event_id": "REPLACE_WITH_SATURDAY_EVENT_ID",         "location_id": "REPLACE_WITH_SATURDAY_LOCATION_ID",   "weekday": 5},
-    "sunday":    {"name": "Drop In Badminton Adult - Guildford (Sun 8:30am)",            "event_id": "382ea32a-2d21-5709-a715-8e6cd7562e9a", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 6},
+    "monday":    {"name": "Newton Mon 6:45pm",       "event_id": "65abb86d-b638-c9ff-b0f5-64f5db71c690", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 0},
+    "tuesday":   {"name": "Chuck Bailey Tue 6:30pm", "event_id": "21421a18-8d3f-78b6-0c0d-0d996bbc1ebb", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 1},
+    "wednesday": {"name": "Newton Wed 7:00pm",       "event_id": "d01f26e7-3dc0-7f33-d611-c305bc786f9c", "location_id": "0a9259fd-e827-477b-94a7-997feb0945d6", "weekday": 2},
+    "thursday":  {"name": "Guildford Thu 7:00pm",    "event_id": "REPLACE_WITH_THURSDAY_EVENT_ID",        "location_id": "REPLACE_WITH_THURSDAY_LOCATION_ID",   "weekday": 3},
+    "friday":    {"name": "Guildford Fri 5:00pm",    "event_id": "REPLACE_WITH_FRIDAY_EVENT_ID",          "location_id": "REPLACE_WITH_FRIDAY_LOCATION_ID",     "weekday": 4},
+    "saturday":  {"name": "Guildford Sat 6:00pm",    "event_id": "REPLACE_WITH_SATURDAY_EVENT_ID",        "location_id": "REPLACE_WITH_SATURDAY_LOCATION_ID",   "weekday": 5},
+    "sunday":    {"name": "Guildford Sun 8:30am",    "event_id": "382ea32a-2d21-5709-a715-8e6cd7562e9a", "location_id": "a89fe9f3-5ece-4158-a87d-c61ec1e99601", "weekday": 6},
 }
 
 
@@ -37,21 +38,21 @@ def get_occurrence_date(session):
     return (now + timedelta(days=days_ahead)).date().strftime("%Y%m%d")
 
 
-def js_click(page, text, partial=False):
+def click_element(page, text, partial=False):
     for frame in page.frames:
         try:
             cmp = "t.includes" if partial else "t ==="
             found = frame.evaluate(f"""() => {{
-                const els = [...document.querySelectorAll('button, input[type=submit], a, span[role=button]')];
+                const els = [...document.querySelectorAll('a, button, input[type=submit]')];
                 const el = els.find(e => {{
-                    const t = (e.innerText || e.textContent || e.value || e.title || '').trim();
+                    const t = (e.innerText || e.textContent || e.value || '').trim();
                     return {cmp}('{text}');
                 }});
-                if (el) {{ el.scrollIntoView(); el.click(); return el.tagName + ':' + (el.className||''); }}
-                return null;
+                if (el) {{ el.scrollIntoView(); el.click(); return true; }}
+                return false;
             }}""")
             if found:
-                log.info(f"Clicked '{text}' ({found}) in frame: {frame.url[:70]}")
+                log.info(f"Clicked '{text}' in {frame.url[:60]}")
                 return True
         except Exception:
             pass
@@ -77,40 +78,19 @@ def register(day):
         f"&waitListMode=False"
     )
 
-    log.info(f"Session: {session['name']}")
-    log.info(f"Date:    {occurrence_date}")
+    log.info(f"Session: {session['name']} | Date: {occurrence_date}")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False, args=['--no-sandbox', '--disable-dev-shm-usage'])
-        context = browser.new_context(viewport={"width": 1280, "height": 900})
-
-        # Capture ALL network requests at context level
-        captured_requests = []
-        captured_responses = []
-
-        def on_request(request):
-            if "ProcessTransaction" in request.url:
-                captured_requests.append({
-                    "url": request.url,
-                    "method": request.method,
-                    "post_data": request.post_data,
-                    "headers": dict(request.headers)
-                })
-
-        def on_response(response):
-            if "ProcessTransaction" in response.url:
-                try:
-                    captured_responses.append({
-                        "url": response.url,
-                        "status": response.status,
-                        "body": response.text()
-                    })
-                except Exception:
-                    pass
-
-        context.on("request", on_request)
-        context.on("response", on_response)
+        browser = p.chromium.launch(
+            headless=False,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
+        )
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 900},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
         page = context.new_page()
+        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         # ── Login ─────────────────────────────────────────────────────────────
         log.info("Logging in...")
@@ -131,142 +111,75 @@ def register(day):
             if "accounts.surrey.ca" not in page.url:
                 break
         page.wait_for_timeout(2000)
-        log.info(f"Logged in. URL: {page.url}")
+        log.info(f"Logged in: {page.url[:60]}")
 
         # ── Clear stale cart ──────────────────────────────────────────────────
         page.goto(f"{BASE_URL}/23615/Menu/SocialSite/MemberCheckout", wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000)
-        if js_click(page, "Clear Cart", partial=True):
+        if click_element(page, "Clear Cart", partial=True):
             log.info("Cleared cart")
             page.wait_for_timeout(2000)
 
-        # ── Navigate to registration page ─────────────────────────────────────
+        # ── Navigate to registration ──────────────────────────────────────────
         log.info("Loading registration page...")
         page.goto(reg_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(5000)
-        log.info(f"Reg page: {page.url}")
+        log.info(f"Reg page: {page.url[:80]}")
 
-        # Dismiss cart popup
-        page.wait_for_timeout(1000)
-        if js_click(page, "Continue"):
+        if click_element(page, "Continue"):
             log.info("Dismissed popup")
             page.wait_for_timeout(3000)
 
         page.screenshot(path="debug.png")
 
-        # ── Step 1: Next (Attendees) ──────────────────────────────────────────
+        # ── Step 1: Next ──────────────────────────────────────────────────────
         log.info("Step 1: Next...")
         page.wait_for_timeout(2000)
-        js_click(page, "Next")
+        click_element(page, "Next")
         page.wait_for_timeout(4000)
 
-        # ── Step 2: Next (Fees) ───────────────────────────────────────────────
+        # ── Step 2: Next ──────────────────────────────────────────────────────
         log.info("Step 2: Next...")
         page.wait_for_timeout(2000)
-        js_click(page, "Rec Surrey Pass", partial=True)
+        click_element(page, "Rec Surrey Pass", partial=True)
         page.wait_for_timeout(500)
-        js_click(page, "Next")
+        click_element(page, "Next")
         page.wait_for_timeout(4000)
 
         # ── Step 3: Place My Order ────────────────────────────────────────────
         log.info("Step 3: Place My Order...")
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(3000)
         page.screenshot(path="step3.png")
 
-        # Find checkout frame and use Playwright's native click (most reliable)
         checkout_frame = None
         for frame in page.frames:
             if "store-ca.perfectmind.com" in frame.url:
                 checkout_frame = frame
                 break
 
-        import json as _json
-        import requests as _requests
-
         if checkout_frame:
-            log.info(f"Checkout frame found: {checkout_frame.url[:80]}")
-
-            # Extract financeInfoId and shoppingCartKey from page
-            finance_info_id = checkout_frame.evaluate("""() => {
-                const scripts = [...document.querySelectorAll('script')];
-                for (const s of scripts) {
-                    const m = s.textContent.match(/"financeInfoId":"([^"]+)"/);
-                    if (m) return m[1];
-                }
-                return null;
-            }""")
-            log.info(f"financeInfoId: {finance_info_id}")
-
-            # Get shopping cart key from current page URL
-            cart_key = ""
-            if "shoppingCartKey=" in page.url:
-                cart_key = page.url.split("shoppingCartKey=")[1].split("&")[0]
-            log.info(f"Cart key: {cart_key}")
-
-            # Extract all cookies from the browser context
-            cookies = context.cookies()
-            cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
-            log.info(f"Cookies extracted: {len(cookies)} cookies")
-
-            tx_url = f"https://store-ca.perfectmind.com/ProcessTransaction?pmOrgNumber=23615"
-
-            # Click the button to generate a valid reCAPTCHA token
-            # then capture the request body (which contains the token)
-            btn = checkout_frame.locator("button.process-now").first
-            btn.scroll_into_view_if_needed()
-            page.wait_for_timeout(500)
-
-            # Capture the request using Playwright's expect_request
-            captured_body = None
-            captured_headers = None
+            log.info(f"Checkout frame: {checkout_frame.url[:80]}")
             try:
-                with page.expect_request(lambda r: "ProcessTransaction" in r.url, timeout=8000) as req_info:
-                    btn.click(force=True)
-                captured_body = req_info.value.post_data
-                captured_headers = dict(req_info.value.headers)
-                log.info(f"Captured request body: {captured_body[:300] if captured_body else 'none'}")
+                btn = checkout_frame.locator("button.process-now").first
+                btn.wait_for(state="visible", timeout=10000)
+                log.info(f"Button visible: {btn.is_visible()}")
+                btn.click(timeout=10000)
+                log.info("Clicked Place My Order")
             except Exception as e:
-                log.warning(f"Could not capture request: {e}")
-
-            page.wait_for_timeout(2000)
-
-            if captured_body and finance_info_id:
-                # Parse the captured body and add the credit card
-                body = _json.loads(captured_body)
-                body['payNow']['creditCardFinanceInfoPayments'] = [
-                    {"financeInfoId": finance_info_id, "cvv": None}
-                ]
-                log.info(f"Resending with credit card: {_json.dumps(body)[:300]}")
-
-                # Use the captured headers (includes auth cookies) + add cookie header
-                headers = captured_headers or {}
-                headers["Cookie"] = cookie_str
-                headers["Content-Type"] = "application/json"
-
-                resp = _requests.post(tx_url, data=_json.dumps(body), headers=headers, timeout=30)
-                log.info(f"ProcessTransaction response: {resp.status_code} - {resp.text[:500]}")
-
-                if resp.status_code == 200:
-                    try:
-                        resp_json = resp.json()
-                        redirect_url = resp_json.get("redirectUrl", "")
-                        if redirect_url:
-                            log.info(f"Redirecting to: {redirect_url}")
-                            page.goto(redirect_url, wait_until="domcontentloaded", timeout=15000)
-                    except Exception:
-                        pass
-            else:
-                log.warning("No captured body or financeInfoId — cannot resend")
+                log.warning(f"Visible click failed ({e}), trying force...")
+                checkout_frame.locator("button.process-now").first.click(force=True)
+                log.info("Force clicked Place My Order")
         else:
-            log.warning("No checkout frame found")
-            js_click(page, "Place My Order", partial=True)
+            log.warning("Checkout frame not found!")
 
+        try:
+            page.wait_for_load_state("networkidle", timeout=20000)
+        except Exception:
+            pass
         page.wait_for_timeout(5000)
-
         page.screenshot(path="final.png")
         log.info(f"Final URL: {page.url}")
 
-        # Check all frames for confirmation
         full_text = ""
         for frame in page.frames:
             try:
@@ -278,10 +191,8 @@ def register(day):
             log.info("✅ Registration successful!")
         elif "already registered" in full_text:
             log.info("✅ Already registered.")
-        elif "receipt" in full_text or "confirmation" in full_text:
-            log.info("✅ Registration confirmed!")
         else:
-            log.warning(f"⚠️ Could not confirm. Text: {full_text[:400]}")
+            log.warning(f"⚠️ Check final.png. Text: {full_text[:300]}")
 
         browser.close()
 
