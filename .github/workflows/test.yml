@@ -24,18 +24,13 @@ jobs:
         run: |
           Xvfb :99 -screen 0 1280x900x24 &
           sleep 2
-          python register.py --day tuesday
+          python register.py --day friday
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: debug-test
           path: |
-            login_page.png
-            login_filled.png
-            after_login.png
-            search_results.png
-            landing_page.png
             debug.png
             step3.png
             final.png
