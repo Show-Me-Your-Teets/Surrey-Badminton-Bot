@@ -129,9 +129,27 @@ def register(day):
         page.wait_for_timeout(3000)
 
         if "accounts.surrey.ca" in page.url:
-            page.wait_for_selector('input[name="Email"]', state="visible", timeout=15000)
-            page.fill('input[name="Email"]', email)
-            page.fill('input[type="password"]', password)
+            # Wait for any email input to appear
+            page.wait_for_selector(
+                'input[name="Email"], input[id="Email"], input[type="email"], #loginradius-login-emailid',
+                state="attached", timeout=15000
+            )
+            page.wait_for_timeout(1000)
+            # Fill whichever field is present
+            for sel in ['input[name="Email"]', 'input[id="Email"]', 'input[type="email"]', '#loginradius-login-emailid']:
+                try:
+                    if page.locator(sel).count() > 0:
+                        page.fill(sel, email)
+                        break
+                except Exception:
+                    pass
+            for sel in ['input[type="password"]', '#loginradius-login-password']:
+                try:
+                    if page.locator(sel).count() > 0:
+                        page.fill(sel, password)
+                        break
+                except Exception:
+                    pass
             page.evaluate("""
                 () => {
                     const btn = document.getElementById('loginradius-submit-login')
