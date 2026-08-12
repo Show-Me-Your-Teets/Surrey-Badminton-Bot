@@ -119,14 +119,11 @@ def register(day):
 
         # ── Login ─────────────────────────────────────────────────────────────
         log.info("Logging in...")
-        page.goto(
-            f"{BASE_URL}/23615/Menu/BookMe4EventParticipants"
-            f"?eventId=c1713be0-fd03-f75a-6ad6-c8e29b17eb76"
-            f"&occurrenceDate=20260714&widgetId={WIDGET_ID}"
-            f"&locationId=a89fe9f3-5ece-4158-a87d-c61ec1e99601&waitListMode=False",
-            wait_until="domcontentloaded", timeout=30000
-        )
+        # Go to perfectmind home — will redirect to login
+        page.goto(f"{BASE_URL}/23615/Menu/SocialSite/Home",
+                  wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
+        log.info(f"Initial page: {page.url}")
 
         if "accounts.surrey.ca" in page.url:
             # Wait for any email input to appear
