@@ -16,6 +16,8 @@ jobs:
           playwright install chromium
           playwright install-deps chromium
           sudo apt-get install -y xvfb
+      - name: Show runner egress IP + org (diagnostic)
+        run: curl -s https://ipinfo.io/json
       - name: Test session
         env:
           SURREY_EMAIL: ${{ secrets.SURREY_EMAIL }}
