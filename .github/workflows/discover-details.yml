@@ -1,0 +1,51 @@
+name: Discover Session Details
+on:
+  workflow_dispatch:
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install playwright pytz
+          playwright install chromium
+          playwright install-deps chromium
+          sudo apt-get install -y xvfb
+      - name: Phase 1 - discover recurring series
+        env:
+          SURREY_EMAIL: ${{ secrets.SURREY_EMAIL }}
+          SURREY_PASSWORD: ${{ secrets.SURREY_PASSWORD }}
+          DISPLAY: :99
+        run: |
+          Xvfb :99 -screen 0 1280x900x24 &
+          sleep 2
+          python discover_sessions.py
+      - name: Phase 2 - discover details per series
+        env:
+          SURREY_EMAIL: ${{ secrets.SURREY_EMAIL }}
+          SURREY_PASSWORD: ${{ secrets.SURREY_PASSWORD }}
+          DISPLAY: :99
+        run: |
+          python discover_details.py
+      - name: Upload discovery output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovery-output
+          path: |
+            discovered_sessions.json
+            session_details.json
+            session_details.csv
+            search_results.png
+            search_results_full.png
+            search_results_text.txt
+            discover_login.png
+            detail_sample_0.png
+            detail_sample_1.png
+            detail_sample_2.png
+          if-no-files-found: ignore
