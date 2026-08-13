@@ -12,7 +12,7 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install playwright pytz
           playwright install chromium
           playwright install-deps chromium
           sudo apt-get install -y xvfb
@@ -24,14 +24,11 @@ jobs:
         run: |
           Xvfb :99 -screen 0 1280x900x24 &
           sleep 2
-          python register.py --day friday
+          python register.py
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: debug-test
-          path: |
-            debug.png
-            step3.png
-            final.png
+          name: screenshots
+          path: "*.png"
           if-no-files-found: ignore
