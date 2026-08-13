@@ -272,13 +272,29 @@ def register_for_session(page, target, email, password):
             return True
         elif "unexpected error" in full_text:
             log.warning(f"⚠️ 'Unexpected error' on attempt {attempt}/{MAX_ATTEMPTS} — "
-                        f"likely a reCAPTCHA scoring miss, retrying...")
-            page.wait_for_timeout(2000 + attempt * 1000)
+                        f"reloading to force a fresh reCAPTCHA token before retrying...")
+            if attempt < MAX_ATTEMPTS:
+                page.wait_for_timeout(2000 + attempt * 1000)
+                try:
+                    # Fee selection was already committed to the cart before we
+                    # reached this Payment step, so reloading this page alone
+                    # is enough to get a fresh reCAPTCHA token without needing
+                    # to redo Attendees/Fees.
+                    page.reload(wait_until="domcontentloaded", timeout=30000)
+                except Exception as e:
+                    log.warning(f"Reload failed: {e}")
+                page.wait_for_timeout(4000)
             continue
         else:
             log.warning(f"⚠️ Unknown result on attempt {attempt} — check "
                         f"weekly_{target['weekday']}_final_attempt{attempt}.png")
-            page.wait_for_timeout(2000)
+            if attempt < MAX_ATTEMPTS:
+                page.wait_for_timeout(2000)
+                try:
+                    page.reload(wait_until="domcontentloaded", timeout=30000)
+                except Exception as e:
+                    log.warning(f"Reload failed: {e}")
+                page.wait_for_timeout(4000)
             continue
 
     log.error(f"❌ Exhausted {MAX_ATTEMPTS} attempts for {target['label']} without success")
