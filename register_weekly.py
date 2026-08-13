@@ -210,59 +210,79 @@ def register_for_session(page, target, email, password):
     log.info("=== Place My Order ===")
     page.wait_for_timeout(3000)
 
-    checkout_frame = None
-    for frame in page.frames:
-        if "store-ca.perfectmind.com" in frame.url:
-            checkout_frame = frame
-            break
+    MAX_ATTEMPTS = 4
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        checkout_frame = None
+        for frame in page.frames:
+            if "store-ca.perfectmind.com" in frame.url:
+                checkout_frame = frame
+                break
 
-    if not checkout_frame:
-        log.error(f"No checkout frame found for {target['label']}!")
-        return False
+        if not checkout_frame:
+            log.error(f"No checkout frame found for {target['label']}!")
+            return False
 
-    btn = checkout_frame.locator("button.process-now").first
-    btn.wait_for(state="attached", timeout=10000)
-    btn.scroll_into_view_if_needed()
-    page.wait_for_timeout(1000)
-
-    box = btn.bounding_box()
-    if box:
-        target_x = box['x'] + box['width'] / 2
-        target_y = box['y'] + box['height'] / 2
-        page.mouse.move(target_x - 120, target_y - 60, steps=8)
-        page.wait_for_timeout(180)
-        page.mouse.move(target_x - 30, target_y - 10, steps=6)
-        page.wait_for_timeout(120)
-        page.mouse.move(target_x, target_y, steps=4)
-        page.wait_for_timeout(250)
-        page.mouse.click(target_x, target_y)
-    else:
-        btn.click(force=True)
-    log.info("✓ Clicked Place My Order!")
-
-    try:
-        page.wait_for_load_state("networkidle", timeout=20000)
-    except Exception:
-        pass
-    page.wait_for_timeout(5000)
-    page.screenshot(path=f"weekly_{target['weekday']}_final.png")
-
-    full_text = ""
-    for frame in page.frames:
+        btn = checkout_frame.locator("button.process-now").first
         try:
-            full_text += frame.inner_text("body").lower() + " "
+            btn.wait_for(state="attached", timeout=10000)
+        except Exception:
+            log.warning(f"Place My Order button not found on attempt {attempt}")
+            page.wait_for_timeout(2000)
+            continue
+        btn.scroll_into_view_if_needed()
+        page.wait_for_timeout(1000)
+
+        box = btn.bounding_box()
+        if box:
+            target_x = box['x'] + box['width'] / 2
+            target_y = box['y'] + box['height'] / 2
+            # Slightly randomized human-like approach path each attempt
+            offset = 20 * attempt
+            page.mouse.move(target_x - 120 - offset, target_y - 60, steps=8)
+            page.wait_for_timeout(180)
+            page.mouse.move(target_x - 30, target_y - 10, steps=6)
+            page.wait_for_timeout(120)
+            page.mouse.move(target_x, target_y, steps=4)
+            page.wait_for_timeout(250 + attempt * 100)
+            page.mouse.click(target_x, target_y)
+        else:
+            btn.click(force=True)
+        log.info(f"✓ Clicked Place My Order (attempt {attempt}/{MAX_ATTEMPTS})")
+
+        try:
+            page.wait_for_load_state("networkidle", timeout=20000)
         except Exception:
             pass
+        page.wait_for_timeout(5000)
+        page.screenshot(path=f"weekly_{target['weekday']}_final_attempt{attempt}.png")
 
-    if "thank you" in full_text:
-        log.info(f"✅ REGISTRATION SUCCESSFUL: {target['label']} on {target['occurrenceDate']}")
-        return True
-    elif "already registered" in full_text:
-        log.info(f"✅ Already registered: {target['label']} on {target['occurrenceDate']}")
-        return True
-    else:
-        log.warning(f"⚠️ Unknown result for {target['label']} — check weekly_{target['weekday']}_final.png")
-        return False
+        full_text = ""
+        for frame in page.frames:
+            try:
+                full_text += frame.inner_text("body").lower() + " "
+            except Exception:
+                pass
+
+        if "thank you" in full_text:
+            log.info(f"✅ REGISTRATION SUCCESSFUL: {target['label']} on {target['occurrenceDate']} "
+                     f"(attempt {attempt})")
+            return True
+        elif "already registered" in full_text:
+            log.info(f"✅ Already registered: {target['label']} on {target['occurrenceDate']}")
+            return True
+        elif "unexpected error" in full_text:
+            log.warning(f"⚠️ 'Unexpected error' on attempt {attempt}/{MAX_ATTEMPTS} — "
+                        f"likely a reCAPTCHA scoring miss, retrying...")
+            page.wait_for_timeout(2000 + attempt * 1000)
+            continue
+        else:
+            log.warning(f"⚠️ Unknown result on attempt {attempt} — check "
+                        f"weekly_{target['weekday']}_final_attempt{attempt}.png")
+            page.wait_for_timeout(2000)
+            continue
+
+    log.error(f"❌ Exhausted {MAX_ATTEMPTS} attempts for {target['label']} without success")
+    return False
 
 
 def run():
