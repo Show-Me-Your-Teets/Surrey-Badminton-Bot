@@ -119,11 +119,16 @@ def register(day):
 
         # ── Login ─────────────────────────────────────────────────────────────
         log.info("Logging in...")
-        # Go to perfectmind home — will redirect to login
-        page.goto(f"{BASE_URL}/23615/Menu/SocialSite/Home",
-                  wait_until="domcontentloaded", timeout=30000)
+        page.goto(
+            "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authorize"
+            "?client_id=9082628b-1eed-4ccb-9ba9-bae04e1f4d13"
+            "&response_type=code&scope=openid%20email%20profile"
+            "&redirect_uri=https%3A//www.surrey.ca/openid-connect/generic"
+            "&state=kqpp3LJd00-CdKqRZZCoCX9YafSq8Z3menVhsqEDYGM&prompt=login",
+            wait_until="domcontentloaded", timeout=30000
+        )
         page.wait_for_timeout(3000)
-        log.info(f"Initial page: {page.url}")
+        log.info(f"Login page: {page.url}")
 
         if "accounts.surrey.ca" in page.url:
             # Wait for any email input to appear
