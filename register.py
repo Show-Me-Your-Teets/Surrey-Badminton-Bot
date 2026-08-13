@@ -107,7 +107,18 @@ def run():
             viewport={"width": 1280, "height": 900},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
         ).new_page()
-        page.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            window.chrome = { runtime: {} };
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications'
+                    ? Promise.resolve({ state: Notification.permission })
+                    : originalQuery(parameters)
+            );
+        """)
 
         # ── Step 1: Login ─────────────────────────────────────────────────────
         log.info("=== Step 1: Login ===")
@@ -170,16 +181,55 @@ def run():
             sys.exit(1)
 
         log.info(f"Checkout frame: {checkout_frame.url[:80]}")
+
+        # Log any recaptcha iframes already present on the page (badge, anchor, bframe)
+        for frame in page.frames:
+            if "recaptcha" in frame.url.lower():
+                log.info(f"[recaptcha iframe present] {frame.url[:150]}")
+
+        # ── Diagnostics: watch for reCAPTCHA / recaptcha-related traffic ──────
+        def _on_response(resp):
+            u = resp.url
+            if "recaptcha" in u or "gstatic" in u or "google.com/recaptcha" in u:
+                log.info(f"[recaptcha net] {resp.status} {u[:120]}")
+        def _on_requestfailed(req):
+            if "recaptcha" in req.url or "gstatic" in req.url:
+                log.warning(f"[recaptcha FAILED] {req.failure} {req.url[:120]}")
+        def _on_console(msg):
+            if "recaptcha" in msg.text.lower() or "captcha" in msg.text.lower():
+                log.info(f"[console] {msg.text[:200]}")
+        page.on("response", _on_response)
+        page.on("requestfailed", _on_requestfailed)
+        page.on("console", _on_console)
+
         btn = checkout_frame.locator("button.process-now").first
         btn.wait_for(state="attached", timeout=10000)
         btn.scroll_into_view_if_needed()
         page.wait_for_timeout(1000)
+
+        # ── Human-like approach: move the mouse in, hover, pause, then click ──
         box = btn.bounding_box()
         if box:
-            page.mouse.click(box['x'] + box['width']/2, box['y'] + box['height']/2)
+            target_x = box['x'] + box['width'] / 2
+            target_y = box['y'] + box['height'] / 2
+            # Start from a plausible current position and move in a couple of steps
+            page.mouse.move(target_x - 120, target_y - 60, steps=8)
+            page.wait_for_timeout(180)
+            page.mouse.move(target_x - 30, target_y - 10, steps=6)
+            page.wait_for_timeout(120)
+            page.mouse.move(target_x, target_y, steps=4)
+            page.wait_for_timeout(250)  # brief hover, like a human deciding to click
+            page.mouse.click(target_x, target_y)
         else:
             btn.click(force=True)
         log.info("✓ Clicked Place My Order!")
+
+        # Snapshot the reCAPTCHA badge area immediately, before it can resolve/hide
+        page.wait_for_timeout(1200)
+        try:
+            page.screenshot(path="s5b_immediately_after_click.png")
+        except Exception:
+            pass
 
         try:
             page.wait_for_load_state("networkidle", timeout=20000)
