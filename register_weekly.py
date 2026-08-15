@@ -36,6 +36,14 @@ WIDGET_ID = "b4059e75-9755-401f-a7b5-d7c75361420d"
 # scheduling interval should be <= this window to avoid gaps).
 OPEN_WINDOW_MINUTES = 6
 
+# If earlier attempts fail (e.g. a bad-luck runner IP hitting reCAPTCHA),
+# keep automatically retrying on every subsequent scheduled run for this
+# long after the session opens, instead of only trying once and giving up.
+# The site's own state prevents actual duplicate registrations, and once a
+# session is confirmed full-with-no-waitlist, register_for_session() exits
+# fast (no clicking), so repeated checks within this window are cheap.
+CATCHUP_WINDOW_MINUTES = 90
+
 LOGIN_URL = (
     "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authorize"
     "?client_id=9082628b-1eed-4ccb-9ba9-bae04e1f4d13"
@@ -72,9 +80,13 @@ SCHEDULE = [
 
 
 def find_sessions_opening_now(now):
-    """Return schedule entries whose 72h-before-start opening moment is
-    within OPEN_WINDOW_MINUTES of `now`, along with the target occurrence
-    date each one refers to."""
+    """Return schedule entries that are currently within their registration
+    catch-up window: from the moment they open (72h before start) through
+    CATCHUP_WINDOW_MINUTES afterward. This means a session keeps getting
+    retried automatically on every scheduled run within that window, not
+    just once at the exact opening minute — so a single failed attempt
+    (e.g. a bad-luck runner IP) doesn't require any manual intervention to
+    recover from."""
     hits = []
     # Check the next ~10 days of candidate occurrences for each schedule
     # entry (covers the weekday recurring weekly).
@@ -87,8 +99,8 @@ def find_sessions_opening_now(now):
                 candidate_date, dtime(*entry["start_time"]), tzinfo=VANCOUVER
             )
             opening_dt = start_dt - timedelta(hours=72)
-            diff_minutes = abs((now - opening_dt).total_seconds()) / 60
-            if diff_minutes <= OPEN_WINDOW_MINUTES:
+            catchup_end = opening_dt + timedelta(minutes=CATCHUP_WINDOW_MINUTES)
+            if opening_dt - timedelta(minutes=OPEN_WINDOW_MINUTES) <= now <= catchup_end:
                 hits.append({**entry, "occurrenceDate": candidate_date.strftime("%Y%m%d"),
                              "opening_dt": opening_dt, "start_dt": start_dt})
     return hits
