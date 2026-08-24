@@ -1,38 +1,63 @@
-name: Test Manual Session
-on:
-  workflow_dispatch:
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: |
-          pip install playwright pytz
-          playwright install chromium
-          playwright install-deps chromium
-          sudo apt-get install -y xvfb
-      - name: Show runner egress IP + org (diagnostic)
-        run: curl -s https://ipinfo.io/json
-      - name: Test session
-        env:
-          SURREY_EMAIL: ${{ secrets.SURREY_EMAIL }}
-          SURREY_PASSWORD: ${{ secrets.SURREY_PASSWORD }}
-          DISPLAY: :99
-        run: |
-          Xvfb :99 -screen 0 1280x900x24 &
-          sleep 2
-          python test_session.py
-      - name: Upload debug files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-session-output
-          path: |
-            weekly_*.png
-            login.png
-          if-no-files-found: ignore
+"""
+Manual one-off test: registers for ONE specific session by classId/date,
+reusing the exact same login + registration logic from register_weekly.py.
+Does NOT touch or run the real 8-session schedule. Useful for validating
+that the "navigate to classId landing page -> click REGISTER live -> run
+Attendees/Fees/Payment flow" mechanism works generically, on a session we
+didn't specifically build the schedule around.
+
+Edit TARGET below to point at whatever session you want to test next.
+"""
+
+import os
+import logging
+from playwright.sync_api import sync_playwright
+
+from register_weekly import login, register_for_session, LOGIN_URL
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger(__name__)
+
+# Saturday, Aug 15 2026 - Drop In Badminton - 13+ - Newton Recreation Centre - Wave Pool - 10:00am-12:00pm
+# NOT part of the real weekly schedule - manual test only.
+TARGET = {
+    "label": "Wednesday 13+ Guildford AM (MANUAL TEST #3 - low stakes)",
+    "weekday": 2,
+    "classId": "aab61a52-274c-4d38-8a6a-4442f7c0bd1a",
+    "occurrenceDate": "20260826",
+}
+
+
+def run():
+    email = os.environ["SURREY_EMAIL"]
+    password = os.environ["SURREY_PASSWORD"]
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=False,
+            args=["--no-sandbox", "--disable-dev-shm-usage",
+                  "--disable-blink-features=AutomationControlled"]
+        )
+        page = browser.new_context(
+            viewport={"width": 1280, "height": 900},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+        ).new_page()
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            window.chrome = { runtime: {} };
+        """)
+
+        log.info("=== Login ===")
+        page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+        login(page, email, password)
+
+        ok = register_for_session(page, TARGET, email, password)
+        log.info(f"{'✅ SUCCESS' if ok else '❌ FAILED/SKIPPED'}: {TARGET['label']}")
+
+        browser.close()
+
+
+if __name__ == "__main__":
+    run()
