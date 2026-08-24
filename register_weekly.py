@@ -21,6 +21,7 @@ Design notes:
 
 import os
 import sys
+import time
 import logging
 from datetime import datetime, timedelta, time as dtime
 from zoneinfo import ZoneInfo
@@ -131,6 +132,43 @@ def click(page, text, partial=False):
     return False
 
 
+def wait_for_exact_opening(opening_dt):
+    """Sit and wait until precisely `opening_dt` (Vancouver time) before
+    returning, so REGISTER gets clicked at exactly the right second rather
+    than whenever the workflow happened to reach this point. If we're
+    already past opening_dt (workflow started late), returns immediately -
+    no point waiting for a moment that's already gone."""
+    now = datetime.now(VANCOUVER)
+    seconds_early = (opening_dt - now).total_seconds()
+    if seconds_early <= 0:
+        log.info(f"Already at/past the opening moment ({opening_dt.strftime('%I:%M:%S %p')}) - proceeding immediately")
+        return
+    if seconds_early > 300:
+        # More than 5 minutes early is unexpected given how we're invoked -
+        # something's off with the schedule math. Don't sleep for a long
+        # time inside a run; just proceed rather than risk a workflow
+        # timeout.
+        log.warning(f"{seconds_early:.0f}s until opening - more than expected, proceeding without waiting")
+        return
+
+    log.info(f"Arrived {seconds_early:.1f}s early - waiting precisely until {opening_dt.strftime('%I:%M:%S %p')}")
+    # Coarse sleep for most of the wait, then fine-grained polling for the
+    # final second so we land within ~50ms of the exact target instead of
+    # drifting on one long sleep.
+    while True:
+        now = datetime.now(VANCOUVER)
+        remaining = (opening_dt - now).total_seconds()
+        if remaining <= 0:
+            break
+        elif remaining > 1:
+            time.sleep(min(remaining - 1, 1.0))
+        else:
+            time.sleep(0.02)
+    actual_now = datetime.now(VANCOUVER)
+    log.info(f"✓ Proceeding at {actual_now.strftime('%I:%M:%S.%f')[:-3]} "
+             f"(target was {opening_dt.strftime('%I:%M:%S')})")
+
+
 def click_with_retry(page, text, partial=False, attempts=5, wait_between=1500):
     """Like click(), but retries for a few seconds if the target isn't
     there yet - handles pages that haven't finished loading, which became
@@ -210,6 +248,21 @@ def register_for_session(page, target, email, password):
         login(page, email, password)
         page.goto(landing_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
+
+    # If we got here BEFORE the exact opening moment (e.g. the workflow
+    # started a bit early), wait it out precisely instead of clicking
+    # REGISTER as soon as we arrive - that's what actually causes
+    # registering at 6:55 or 7:05 instead of exactly 7:00.
+    wait_for_exact_opening(target["opening_dt"])
+
+    # The page doesn't dynamically update on its own - the REGISTER button
+    # literally isn't in the server's response until the exact opening
+    # moment. If we arrived early and waited, we're still holding the old
+    # (not-yet-open) page in memory, so re-fetch it now that the moment
+    # has actually passed.
+    log.info("Reloading landing page to pick up the now-open registration state...")
+    page.reload(wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(2000)
 
     full_text = ""
     for frame in page.frames:
