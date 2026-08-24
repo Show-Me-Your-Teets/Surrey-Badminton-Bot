@@ -42,7 +42,11 @@ OPEN_WINDOW_MINUTES = 6
 # The site's own state prevents actual duplicate registrations, and once a
 # session is confirmed full-with-no-waitlist, register_for_session() exits
 # fast (no clicking), so repeated checks within this window are cheap.
-CATCHUP_WINDOW_MINUTES = 90
+# NOTE: this is our own self-imposed cutoff, not a real site deadline -
+# the actual registration stays open until the class fills or the session
+# starts. Set generously long so we don't give up while a real opportunity
+# still exists.
+CATCHUP_WINDOW_MINUTES = 6 * 60
 
 LOGIN_URL = (
     "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authorize"
@@ -131,30 +135,44 @@ def login(page, email, password):
     page.wait_for_timeout(3000)
     log.info(f"Login page: {page.url[:80]}")
 
-    for sel in ['#loginradius-login-emailid', 'input[type="email"]', 'input[name="Email"]']:
-        try:
-            if page.locator(sel).count() > 0:
-                page.fill(sel, email)
-                break
-        except Exception:
-            pass
-    for sel in ['#loginradius-login-password', 'input[type="password"]']:
-        try:
-            if page.locator(sel).count() > 0:
-                page.fill(sel, password)
-                break
-        except Exception:
-            pass
-    page.evaluate("""() => {
-        const btn = document.getElementById('loginradius-submit-login')
-            || document.querySelector('button[type=submit]')
-            || document.querySelector('input[type=submit]');
-        if (btn) {
-            btn.style.cssText = 'display:block!important;visibility:visible!important;opacity:1!important;';
-            btn.click();
-        }
-    }""")
-    log.info("✓ Submitted login")
+    # If we already have a valid session (e.g. from saved cookies), the page
+    # may auto-redirect away from the login form before we ever try to fill
+    # or click anything. Guard every step against that.
+    if "accounts.surrey.ca" not in page.url:
+        log.info("Already past login (reused session) - skipping login form")
+        return
+
+    try:
+        for sel in ['#loginradius-login-emailid', 'input[type="email"]', 'input[name="Email"]']:
+            try:
+                if page.locator(sel).count() > 0:
+                    page.fill(sel, email, timeout=5000)
+                    break
+            except Exception:
+                pass
+        for sel in ['#loginradius-login-password', 'input[type="password"]']:
+            try:
+                if page.locator(sel).count() > 0:
+                    page.fill(sel, password, timeout=5000)
+                    break
+            except Exception:
+                pass
+        page.evaluate("""() => {
+            const btn = document.getElementById('loginradius-submit-login')
+                || document.querySelector('button[type=submit]')
+                || document.querySelector('input[type=submit]');
+            if (btn) {
+                btn.style.cssText = 'display:block!important;visibility:visible!important;opacity:1!important;';
+                btn.click();
+            }
+        }""")
+        log.info("✓ Submitted login")
+    except Exception as e:
+        # The page most likely navigated away on its own mid-step (e.g. an
+        # already-valid session redirecting past the login form right as we
+        # tried to fill/click it). That's not a failure - just move on to
+        # the URL-change check below.
+        log.info(f"Login form interaction interrupted (likely auto-redirect already in progress): {e}")
 
     for _ in range(30):
         page.wait_for_timeout(1000)
@@ -313,6 +331,9 @@ def register_for_session(page, target, email, password):
     return False
 
 
+STORAGE_STATE_PATH = "browser_state.json"
+
+
 def run():
     email = os.environ["SURREY_EMAIL"]
     password = os.environ["SURREY_PASSWORD"]
@@ -327,16 +348,23 @@ def run():
 
     log.info(f"{len(hits)} session(s) opening now: {[h['label'] for h in hits]}")
 
+    have_saved_state = os.path.exists(STORAGE_STATE_PATH)
+    log.info(f"Reusing saved browser session/cookies from a prior run: {have_saved_state}")
+
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=False,
             args=["--no-sandbox", "--disable-dev-shm-usage",
                   "--disable-blink-features=AutomationControlled"]
         )
-        page = browser.new_context(
-            viewport={"width": 1280, "height": 900},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
-        ).new_page()
+        context_kwargs = {
+            "viewport": {"width": 1280, "height": 900},
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        }
+        if have_saved_state:
+            context_kwargs["storage_state"] = STORAGE_STATE_PATH
+        context = browser.new_context(**context_kwargs)
+        page = context.new_page()
         page.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
             Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
@@ -362,6 +390,12 @@ def run():
             except Exception as e:
                 log.error(f"Exception registering {target['label']}: {e}")
                 results[target["label"]] = False
+
+        try:
+            context.storage_state(path=STORAGE_STATE_PATH)
+            log.info("✓ Saved browser session state for next run")
+        except Exception as e:
+            log.warning(f"Could not save browser state: {e}")
 
         browser.close()
 
