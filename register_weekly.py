@@ -263,7 +263,13 @@ def register_for_session(page, target, email, password):
     log.info("=== Place My Order ===")
     page.wait_for_timeout(3000)
 
-    MAX_ATTEMPTS = 4
+    # Each attempt takes ~10-15s (click, check result, reload on failure).
+    # reCAPTCHA success looks probabilistic per-attempt, so more attempts
+    # meaningfully raises the odds - confirmed by a real registration that
+    # only succeeded on attempt 4 of the previous 4-attempt ceiling.
+    # 10 attempts is ~2-2.5 min, comfortably within the workflow's 15 min
+    # timeout alongside login/navigation overhead.
+    MAX_ATTEMPTS = 10
     for attempt in range(1, MAX_ATTEMPTS + 1):
         checkout_frame = None
         for frame in page.frames:
