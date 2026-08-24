@@ -63,11 +63,11 @@ SCHEDULE = [
     {"label": "Monday 13+ Newton",     "weekday": 0, "start_time": (18, 45),
      "classId": "ee44bad7-9e60-450e-8e94-07d6520e6e3f"},
     {"label": "Tuesday Adult ChuckBailey", "weekday": 1, "start_time": (18, 30),
-     "classId": "40aba045-884b-48d6-b3a5-34599f717a41"},
+     "classId": "63be0d56-18dd-4d1b-bd68-2e3108c561b8"},  # bridge series (covers Aug18/25 only)
     {"label": "Wednesday 13+ Newton",  "weekday": 2, "start_time": (19, 0),
-     "classId": "48294a6e-f040-4f23-b545-b23e67eeabbd"},
+     "classId": "2b5c02d7-0a12-4786-a13c-28d355145e88"},  # bridge series (covers Aug19/26, Sep2)
     {"label": "Thursday Adult Guildford", "weekday": 3, "start_time": (19, 0),
-     "classId": "08d130f5-59fe-4bfd-a119-331a5bbb30ab"},
+     "classId": "21d1abb5-f174-4e36-bc5e-3e988ee28b26"},  # bridge series (covers Aug13/20/27)
     {"label": "Friday Adult Guildford", "weekday": 4, "start_time": (18, 45),
      "classId": "d06b8eb7-f730-42b6-bf93-eab5841e6c8e"},
     {"label": "Saturday Adult Guildford", "weekday": 5, "start_time": (18, 0),
