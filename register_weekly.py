@@ -47,7 +47,14 @@ OPEN_WINDOW_MINUTES = 6
 # the actual registration stays open until the class fills or the session
 # starts. Set generously long so we don't give up while a real opportunity
 # still exists.
-CATCHUP_WINDOW_MINUTES = 6 * 60
+# NOTE: this is our own self-imposed cutoff, not a real site deadline -
+# the actual registration stays open until the class fills or the session
+# starts. Now that cron-job.org triggers precisely every minute (rather
+# than GH's unreliable schedule:), we don't need hours of slack anymore -
+# 25 minutes comfortably covers the 10 retry-with-reload attempts plus
+# some margin for GitHub Actions queueing delay, without keeping the bot
+# spinning up runs for hours after every opening.
+CATCHUP_WINDOW_MINUTES = 25
 
 LOGIN_URL = (
     "https://accounts.surrey.ca/service/oidc/surrey-openid-prod/authorize"
