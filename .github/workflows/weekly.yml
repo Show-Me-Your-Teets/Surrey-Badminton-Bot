@@ -16,6 +16,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Restore browser session state from previous run
+        uses: actions/cache/restore@v4
+        with:
+          path: browser_state.json
+          key: browser-state-${{ github.run_id }}
+          restore-keys: |
+            browser-state-
       - name: Install dependencies
         run: |
           pip install playwright pytz
@@ -33,6 +40,12 @@ jobs:
           Xvfb :99 -screen 0 1280x900x24 &
           sleep 2
           python register_weekly.py
+      - name: Save browser session state for next run
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: browser_state.json
+          key: browser-state-${{ github.run_id }}
       - name: Upload debug files
         if: always()
         uses: actions/upload-artifact@v4
