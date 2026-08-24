@@ -21,10 +21,10 @@ log = logging.getLogger(__name__)
 # Saturday, Aug 15 2026 - Drop In Badminton - 13+ - Newton Recreation Centre - Wave Pool - 10:00am-12:00pm
 # NOT part of the real weekly schedule - manual test only.
 TARGET = {
-    "label": "Saturday 13+ Newton Wave Pool (MANUAL TEST)",
-    "weekday": 5,
-    "classId": "0643ef9c-72c4-4429-9535-c6f89164b1eb",
-    "occurrenceDate": "20260815",
+    "label": "Wednesday 13+ Guildford AM (MANUAL TEST #3 - low stakes)",
+    "weekday": 2,
+    "classId": "aab61a52-274c-4d38-8a6a-4442f7c0bd1a",
+    "occurrenceDate": "20260826",
 }
 
 
