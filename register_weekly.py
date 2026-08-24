@@ -131,6 +131,19 @@ def click(page, text, partial=False):
     return False
 
 
+def click_with_retry(page, text, partial=False, attempts=5, wait_between=1500):
+    """Like click(), but retries for a few seconds if the target isn't
+    there yet - handles pages that haven't finished loading, which became
+    more likely once a reused/pre-authenticated session made the flow
+    faster and our fixed wait_for_timeout() delays stopped being enough."""
+    for i in range(attempts):
+        if click(page, text, partial=partial):
+            return True
+        page.wait_for_timeout(wait_between)
+    log.warning(f"⚠️ Could not find/click '{text}' after {attempts} attempts")
+    return False
+
+
 def login(page, email, password):
     page.wait_for_timeout(3000)
     log.info(f"Login page: {page.url[:80]}")
@@ -226,14 +239,24 @@ def register_for_session(page, target, email, password):
 
     log.info("=== Attendees -> Next ===")
     page.wait_for_timeout(2000)
-    click(page, "Next")
+    page.screenshot(path=f"weekly_{target['weekday']}_attendees.png")
+    if not click_with_retry(page, "Next"):
+        log.error(f"❌ Never found Attendees 'Next' button for {target['label']} - "
+                  f"see weekly_{target['weekday']}_attendees.png")
+        return False
     page.wait_for_timeout(4000)
 
     log.info("=== Select free pass -> Next ===")
     page.wait_for_timeout(2000)
-    click(page, "Rec Surrey Pass", partial=True)
+    page.screenshot(path=f"weekly_{target['weekday']}_fees.png")
+    if not click_with_retry(page, "Rec Surrey Pass", partial=True):
+        log.error(f"❌ Never found 'Rec Surrey Pass' option for {target['label']} - "
+                  f"see weekly_{target['weekday']}_fees.png")
+        return False
     page.wait_for_timeout(500)
-    click(page, "Next")
+    if not click_with_retry(page, "Next"):
+        log.error(f"❌ Never found Fees 'Next' button for {target['label']}")
+        return False
     page.wait_for_timeout(4000)
     page.screenshot(path=f"weekly_{target['weekday']}_payment.png")
 
