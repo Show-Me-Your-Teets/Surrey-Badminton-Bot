@@ -1,11 +1,8 @@
 name: Weekly Badminton Registration
 on:
-  schedule:
-    # Every 5 minutes, around the clock. The script itself checks whether
-    # any target session's 72h window is opening right now (Vancouver
-    # time) and exits quickly if not — this avoids GH Actions' UTC-only
-    # cron drifting across BC's DST changes twice a year.
-    - cron: '*/5 * * * *'
+  # Scheduling now handled externally by cron-job.org pinging the
+  # workflow_dispatch API every minute - far more precise than GitHub's
+  # own schedule: cron, which showed 15-40 minute real-world delays.
   workflow_dispatch:
 jobs:
   register:
