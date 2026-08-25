@@ -189,6 +189,22 @@ def click_with_retry(page, text, partial=False, attempts=5, wait_between=1500):
     return False
 
 
+def click_any_with_retry(page, texts, partial=False, attempts=5, wait_between=1500):
+    """Like click_with_retry, but accepts a list of acceptable button labels
+    and clicks whichever one is actually present. The site labels the same
+    logical 'continue' action differently depending on context - e.g. the
+    Attendees step's continue button reads 'Next' on a normal registration
+    but 'Waitlist' when the session is full - and we can't always predict
+    which one we'll hit until we're on the page."""
+    for i in range(attempts):
+        for text in texts:
+            if click(page, text, partial=partial):
+                return True
+        page.wait_for_timeout(wait_between)
+    log.warning(f"⚠️ Could not find/click any of {texts} after {attempts} attempts")
+    return False
+
+
 def login(page, email, password):
     page.wait_for_timeout(3000)
     log.info(f"Login page: {page.url[:80]}")
@@ -297,16 +313,32 @@ def register_for_session(page, target, email, password):
     if click(page, "Continue"):
         page.wait_for_timeout(2000)
 
-    log.info("=== Attendees -> Next ===")
+    log.info("=== Attendees -> Next/Waitlist ===")
     page.wait_for_timeout(2000)
     page.screenshot(path=f"weekly_{target['weekday']}_attendees.png")
-    if not click_with_retry(page, "Next"):
-        log.error(f"❌ Never found Attendees 'Next' button for {target['label']} - "
+    if not click_any_with_retry(page, ["Next", "Waitlist"]):
+        log.error(f"❌ Never found Attendees 'Next'/'Waitlist' button for {target['label']} - "
                   f"see weekly_{target['weekday']}_attendees.png")
         return False
     page.wait_for_timeout(4000)
 
-    log.info("=== Select free pass -> Next ===")
+    # Waitlisting may skip Fees/Payment entirely (no payment needed to join
+    # a waitlist) and land straight on a confirmation. Check for that before
+    # assuming the normal Fees step is next.
+    post_attendees_text = ""
+    for frame in page.frames:
+        try:
+            post_attendees_text += frame.inner_text("body").lower() + " "
+        except Exception:
+            pass
+    if "rec surrey pass" not in post_attendees_text and (
+            "waitlist" in post_attendees_text or "thank you" in post_attendees_text):
+        log.info(f"✅ Appears to have completed via waitlist directly (no Fees/Payment step): "
+                 f"{target['label']}")
+        page.screenshot(path=f"weekly_{target['weekday']}_final.png")
+        return True
+
+    log.info("=== Select free pass -> Next/Waitlist ===")
     page.wait_for_timeout(2000)
     page.screenshot(path=f"weekly_{target['weekday']}_fees.png")
     if not click_with_retry(page, "Rec Surrey Pass", partial=True):
@@ -314,11 +346,27 @@ def register_for_session(page, target, email, password):
                   f"see weekly_{target['weekday']}_fees.png")
         return False
     page.wait_for_timeout(500)
-    if not click_with_retry(page, "Next"):
-        log.error(f"❌ Never found Fees 'Next' button for {target['label']}")
+    if not click_any_with_retry(page, ["Next", "Waitlist"]):
+        log.error(f"❌ Never found Fees 'Next'/'Waitlist' button for {target['label']}")
         return False
     page.wait_for_timeout(4000)
     page.screenshot(path=f"weekly_{target['weekday']}_payment.png")
+
+    # Waitlisting skips Payment/Place-My-Order entirely (confirmed via a
+    # full manual walkthrough: clicking "Waitlist" on the Fees step goes
+    # straight to a "Thank you!" confirmation, with no checkout/reCAPTCHA
+    # step at all). Only a real, spots-available registration goes through
+    # the Payment section below.
+    post_fees_text = ""
+    for frame in page.frames:
+        try:
+            post_fees_text += frame.inner_text("body").lower() + " "
+        except Exception:
+            pass
+    if "thank you" in post_fees_text or "enrolling into the wait list" in post_fees_text:
+        log.info(f"✅ WAITLIST CONFIRMED (no payment step needed): {target['label']} "
+                 f"on {target['occurrenceDate']}")
+        return True
 
     log.info("=== Place My Order ===")
     page.wait_for_timeout(3000)
